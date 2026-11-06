@@ -582,27 +582,135 @@ def render_response_simulation():
       .response-progress span{width:100%}.ecg-line{opacity:1}.ambulance{left:66%}
       .scene-driver{transform:rotate(28deg) translateY(10px)}
     }
+    .response-note{padding-bottom:10px}
+    .response-scene{height:350px;background:linear-gradient(180deg,#14283a 0%,#285064 49%,#526052 50%,#16232b 61%,#0b1219 100%)}
+    .response-scene:before{inset:43% 0 42%;background:linear-gradient(180deg,#eacb9830,#eacb9800)}
+    .response-scene:after{inset:59% 0 0;background:linear-gradient(180deg,#1b2b35,#090f16)}
+    .scene-road{z-index:1;bottom:0;height:39%;background:linear-gradient(180deg,#25343a,#111a20)}
+    .scene-road:before{content:"";position:absolute;left:0;right:-100%;top:48%;height:4px;
+      background:repeating-linear-gradient(90deg,#d9e4dc 0 54px,transparent 54px 112px);
+      animation:road-drive 24s linear infinite}
+    .scene-car{left:4%;bottom:49px;animation:response-drive 24s cubic-bezier(.15,.55,.35,1) infinite}
+    .scene-car-body{background:linear-gradient(160deg,#65a09b,#315962 66%,#20353d);border-color:#a6c1bd}
+    .scene-car-body:after{content:"";position:absolute;right:5px;bottom:8px;width:11px;height:7px;border-radius:3px;
+      background:#ff3347;box-shadow:-180px 0 #ff3347;opacity:0;animation:brake-lights 24s linear infinite}
+    .scene-driver,.scene-neck,.scene-head,.scene-hair{animation:none!important}
+    .scene-wheel{animation:wheel-turn .55s linear infinite}
+    .scene-roadside-car{position:absolute;z-index:5;left:52%;bottom:47px;width:158px;height:86px;
+      opacity:0;animation:discover-car 24s linear infinite}
+    .scene-roadside-car .target-body{position:absolute;left:0;bottom:0;width:158px;height:45px;border:1px solid #9aadb2;
+      border-radius:28px 34px 11px 11px;background:linear-gradient(160deg,#9aa9aa,#53636a 68%,#303b42);
+      box-shadow:0 7px 17px #0009}
+    .scene-roadside-car .target-body:before{content:"";position:absolute;left:32px;top:-29px;width:92px;height:37px;
+      border:1px solid #93a9af;border-radius:40px 40px 3px 3px;background:linear-gradient(135deg,#9bbdc1,#405c67)}
+    .scene-roadside-car .target-body:after{content:"";position:absolute;right:6px;bottom:7px;width:9px;height:7px;
+      border-radius:3px;background:#ff4352;box-shadow:-130px 0 #ff4352}
+    .scene-roadside-car .target-wheel{position:absolute;z-index:2;bottom:-6px;width:29px;height:29px;border:6px solid #89999c;
+      border-radius:50%;background:#121a20}
+    .scene-roadside-car .target-wheel.one{left:22px}.scene-roadside-car .target-wheel.two{right:22px}
+    .target-alert-box{position:absolute;inset:-9px;border:2px solid #ff4657;border-radius:12px;opacity:0;
+      animation:target-alert-box 24s linear infinite}
+    .driver-monitor{position:absolute;z-index:8;left:14px;top:61px;width:176px;height:104px;overflow:hidden;
+      border:1px solid #557486;border-radius:11px;background:linear-gradient(145deg,#294351,#101a25);
+      box-shadow:0 7px 18px #0008}
+    .driver-monitor-title{position:absolute;z-index:2;left:8px;top:6px;color:#c6d9e0;font-size:8px;font-weight:850;letter-spacing:.08em}
+    .monitor-face{position:absolute;left:71px;top:24px;width:36px;height:43px;border:2px solid #e8c1a6;border-radius:48%;
+      background:linear-gradient(140deg,#edc09f,#ae7865)}
+    .monitor-face:before{content:"";position:absolute;left:-3px;top:-5px;width:39px;height:15px;border-radius:50% 50% 15% 15%;background:#26303a}
+    .monitor-eye{position:absolute;left:6px;top:20px;width:22px;height:3px;border-radius:4px;background:#1d2730;
+      animation:eye-detect 24s linear infinite}
+    .monitor-box{position:absolute;left:62px;top:20px;width:54px;height:52px;border:2px solid #63e7c2;border-radius:7px;
+      animation:eye-box 24s linear infinite}
+    .monitor-scan{position:absolute;left:0;right:0;top:-4px;height:2px;background:#66f3d4;box-shadow:0 0 8px #66f3d4;
+      animation:scan-sweep 2.4s linear infinite}
+    .monitor-caption{position:absolute;left:7px;bottom:6px;color:#a8c0cb;font-size:7px}
+    .monitor-caption b{color:#ff5966}
+    .scene-phase{position:absolute;z-index:10;right:13px;top:13px;width:min(48%,320px);height:44px;
+      border:1px solid #526c7c;border-radius:10px;background:#08131ddd;padding:8px 10px;
+      color:#dcedf3;font-size:10px;font-weight:850}
+    .scene-phase span{position:absolute;inset:8px 10px;display:flex;align-items:center;opacity:0;
+      animation:phase-caption 24s linear infinite}
+    .scene-phase span:nth-child(1){animation-delay:0s;color:#90f3d8}
+    .scene-phase span:nth-child(2){animation-delay:4.8s;color:#ffd58b}
+    .scene-phase span:nth-child(3){animation-delay:9.6s;color:#ff9ea4}
+    .scene-phase span:nth-child(4){animation-delay:14.4s;color:#b9e8ff}
+    .scene-phase span:nth-child(5){animation-delay:19.2s;color:#a6f2d8}
+    .speed-streaks{position:absolute;z-index:4;inset:0;opacity:0;pointer-events:none;
+      background:repeating-linear-gradient(0deg,transparent 0 28px,#dff7ff33 29px 31px,transparent 32px 55px);
+      animation:speed-streaks 24s linear infinite}
+    .brake-indicator{position:absolute;z-index:8;left:54%;bottom:136px;color:#ffd777;font-size:22px;opacity:0;
+      animation:brake-indicator 24s linear infinite}
+    .ambulance{left:110%;bottom:47px;width:158px;height:82px;animation:ambulance-arrive 24s cubic-bezier(.18,.75,.22,1) infinite}
+    .stretcher{position:absolute;z-index:9;left:69%;bottom:48px;width:98px;height:19px;opacity:0;
+      animation:patient-transfer 24s ease-in-out infinite}
+    .stretcher:before{content:"";position:absolute;left:0;right:0;top:0;height:5px;border-radius:5px;background:#dce7e8}
+    .stretcher:after{content:"";position:absolute;left:10px;bottom:-7px;width:75px;height:8px;
+      border-left:3px solid #c5d3d4;border-right:3px solid #c5d3d4}
+    .stretcher-person{position:absolute;left:25px;top:-11px;width:48px;height:12px;border-radius:8px;
+      background:linear-gradient(90deg,#ddb295 0 22%,#497784 22% 100%)}
+    .paramedic{position:absolute;z-index:8;left:67%;bottom:51px;width:15px;height:38px;border-radius:7px 7px 3px 3px;
+      background:#eef2e5;opacity:0;animation:paramedic-assist 24s linear infinite}
+    .paramedic:before{content:"";position:absolute;left:2px;top:-12px;width:12px;height:12px;border-radius:50%;background:#c89376}
+    .response-step{animation:stage-active 24s linear infinite}
+    .response-step:nth-child(1){animation-delay:0s}.response-step:nth-child(2){animation-delay:4.8s}
+    .response-step:nth-child(3){animation-delay:9.6s}.response-step:nth-child(4){animation-delay:14.4s}
+    .response-step:nth-child(5){animation-delay:19.2s}
+    .response-progress span{animation:progress-fill 24s linear infinite}
+    @keyframes scan-sweep{to{transform:translateY(104px)}}
+    @keyframes eye-detect{0%,4%,22%,100%{transform:scaleY(1)}8%,19%{transform:scaleY(.18)}}
+    @keyframes eye-box{0%,4%{border-color:#63e7c2}8%,24%{border-color:#ff4557;box-shadow:0 0 13px #ff394d99}}
+    @keyframes phase-caption{0%,17%{opacity:1}19%,100%{opacity:0}}
+    @keyframes road-drive{0%,25%{transform:translateX(0)}43%{transform:translateX(-28%)}55%,100%{transform:translateX(-31%)}}
+    @keyframes speed-streaks{0%,22%{opacity:.5}40%{opacity:.13}52%,100%{opacity:0}}
+    @keyframes response-drive{0%,15%{left:4%}23%{left:8%}34%{left:21%}44%{left:30%}52%,100%{left:30%}}
+    @keyframes discover-car{0%,16%{opacity:0;transform:translateX(42px)}23%,100%{opacity:1;transform:translateX(0)}}
+    @keyframes target-alert-box{0%,18%{opacity:0}23%,40%{opacity:1}48%,100%{opacity:0}}
+    @keyframes brake-lights{0%,35%{opacity:0}39%,55%{opacity:1}59%,100%{opacity:0}}
+    @keyframes brake-indicator{0%,37%{opacity:0;transform:scale(.7)}42%,56%{opacity:1;transform:scale(1)}62%,100%{opacity:0}}
+    @keyframes ambulance-arrive{0%,58%{left:110%}69%{left:84%}73%,96%{left:78%}100%{left:110%}}
+    @keyframes paramedic-assist{0%,72%{opacity:0}76%,98%{opacity:1}}
+    @keyframes patient-transfer{0%,76%{opacity:0;transform:translateX(0)}80%{opacity:1}
+      94%{opacity:1;transform:translateX(74px)}98%,100%{opacity:0;transform:translateX(74px)}}
+    @keyframes stage-active{0%,17%{border-color:#56cbae;background:#13332f;box-shadow:0 0 16px #36d8ae22}19%,100%{border-color:#2c4758;background:#0d1924;box-shadow:none}}
+    @media(max-width:700px){.driver-monitor{left:8px;top:54px;transform:scale(.75);transform-origin:top left}
+      .scene-phase{right:8px;top:54px;width:48%;font-size:8px}.response-scene{height:290px}
+      .scene-car{transform-origin:bottom left;scale:.76}.scene-roadside-car{left:50%;scale:.75;transform-origin:bottom left}
+      .ambulance{scale:.72;transform-origin:bottom left}.stretcher{scale:.75;transform-origin:left bottom}
+      .response-steps{gap:4px;padding:10px 8px}.response-step{padding:8px 3px}.response-step b{font-size:9px}.response-step span{font-size:8px}}
+    @media(prefers-reduced-motion:reduce){.response-demo *{animation:none!important}
+      .response-progress span{width:100%}.scene-car{left:30%}.scene-roadside-car{opacity:1}
+      .ambulance{left:78%}.paramedic{opacity:1}.stretcher{opacity:1;transform:translateX(74px)}
+      .scene-phase span{display:none}.scene-phase span:last-child{display:flex;opacity:1}}
     </style>
     <div class="response-demo" aria-label="자동 재생되는 가상 안전 대응 시나리오">
       <div class="response-heading"><strong>가상 안전 대응 시나리오</strong><span class="response-tag">SIMULATION ONLY · AUTO</span></div>
-      <div class="response-note">경고부터 가상 정차와 모의 구조 도착까지의 흐름을 자동으로 반복 재생합니다.</div>
+      <div class="response-note">차량 안에서 징후를 감지하고, 전방 차량 발견 후 감속·정차해 구급대가 이송하는 순서로 반복 재생합니다.</div>
       <div class="response-scene">
-        <div class="scene-label">AURA DRIVE · DEMO SCENE</div><div class="alert-beacon">주의 경고 · 대응 흐름 예시</div>
+        <div class="scene-label">AURA DRIVE · DEMO SCENE</div>
+        <div class="scene-phase"><span>01 · 차량 안 운전자 눈 감김 징후 감지</span>
+          <span>02 · 전방 정차 차량 발견 · 접근 중</span><span>03 · 위험 회피를 위한 감속</span>
+          <span>04 · 안전거리 확보 후 정차</span><span>05 · 구급차 도착 · 환자 이송</span></div>
+        <div class="driver-monitor"><div class="driver-monitor-title">DRIVER MONITOR · LIVE</div>
+          <div class="monitor-face"><div class="monitor-eye"></div></div><div class="monitor-box"><div class="monitor-scan"></div></div>
+          <div class="monitor-caption"><b>●</b> EYE-CLOSURE ALERT · DEMO</div></div>
         <div class="scene-road"></div>
-        <div class="ecg-line" aria-hidden="true"></div>
         <div class="scene-car"><div class="scene-car-body"></div><div class="scene-wheel one"></div><div class="scene-wheel two"></div><div class="scene-driver"></div></div>
+        <div class="scene-roadside-car"><div class="target-alert-box"></div><div class="target-body"></div>
+          <div class="target-wheel one"></div><div class="target-wheel two"></div></div>
+        <div class="speed-streaks"></div><div class="brake-indicator">⚠</div>
         <div class="ambulance"><div class="siren"></div><div class="ambulance-body"></div>
           <div class="ambulance-wheel one"></div><div class="ambulance-wheel two"></div></div>
+        <div class="paramedic"></div><div class="stretcher"><div class="stretcher-person"></div></div>
       </div>
       <div class="response-progress"><span></span></div>
       <div class="response-steps">
-        <div class="response-step"><b>01 · 감지 예시</b><span>눈 감김 경고 표시</span></div>
-        <div class="response-step"><b>02 · 가상 대응</b><span>감속 안내 연출</span></div>
-        <div class="response-step"><b>03 · 정차 가정</b><span>안전 정차 안내</span></div>
-        <div class="response-step"><b>04 · 상황 가정</b><span>무반응은 연출일 뿐</span></div>
-        <div class="response-step"><b>05 · 모의 구조</b><span>119 차량 도착 장면</span></div>
+        <div class="response-step"><b>01 · 감지</b><span>차량 안 눈 감김 경고</span></div>
+        <div class="response-step"><b>02 · 발견</b><span>전방 차량 확인</span></div>
+        <div class="response-step"><b>03 · 감속</b><span>위험 회피·제동</span></div>
+        <div class="response-step"><b>04 · 정차</b><span>안전거리 확보</span></div>
+        <div class="response-step"><b>05 · 이송</b><span>구급차 도착·탑승</span></div>
       </div>
-      <div class="response-disclaimer">가상 연출입니다. 이 모델은 기절·의료 상황을 진단하거나 차량을 제어하지 않으며, 실제 119 신고·출동 요청도 전송하지 않습니다.</div>
+      <div class="response-disclaimer">전체 흐름은 발표용 가상 연출입니다. 이 모델이 전방 차량·의료 상황을 감지하거나 차량을 제어하지 않으며, 실제 119 신고·출동 요청도 전송하지 않습니다.</div>
     </div>""")
 
 
