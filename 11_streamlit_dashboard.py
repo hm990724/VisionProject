@@ -19,7 +19,6 @@ import torch
 from PIL import Image, ImageDraw
 from common import to_square
 from roi_utils import crop_eyes, LEFT_EYE, RIGHT_EYE
-from aura_safety_sim import SafetySimulation
 
 ROOT = Path(__file__).resolve().parent
 TEAM = ROOT / "teammate_yawn"
@@ -34,7 +33,7 @@ html,body,[data-testid="stApp"]{font-family:Inter,'Noto Sans KR',sans-serif;back
 [data-testid="stMainBlockContainer"]{max-width:1320px;padding:1.3rem 2.2rem 4rem}
 [data-testid="stHeader"]{background:transparent}#MainMenu,footer{visibility:hidden}
 h1,h2,h3{color:#f0f9ff;letter-spacing:-.04em}
-.brand{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;padding:5px 0 19px;border-bottom:1px solid #26384b}
+.brand{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:5px;padding:0 0 9px;border-bottom:1px solid #26384b;line-height:1.25}
 .brand b{font-size:20px;letter-spacing:.17em}.brand b span{color:#88f9db}.brand small{font-size:11px;color:#89a8b9;letter-spacing:.12em}
 .eyebrow{color:#7ff0d0;font-size:11px;font-weight:800;letter-spacing:.2em}.headline{font-size:clamp(24px,3.2vw,40px);font-weight:800;line-height:1.3;margin:10px 0 8px}
 .subtitle{font-size:13px;color:#adc2d3;margin-bottom:18px}
@@ -58,8 +57,8 @@ h1,h2,h3{color:#f0f9ff;letter-spacing:-.04em}
 [data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){background:#1b4745;border-color:#5bbaa6}
 .stButton>button{border:1px solid #3b5b69;border-radius:12px;font-weight:700;min-height:42px}
 .stButton>button[kind="primary"]{background:#89f5d8;color:#082b31;border:0}
-.audio-controls{padding:14px;background:#152637;border:1px solid #375265;border-radius:16px;display:flex;gap:9px;flex-wrap:wrap;align-items:center}
-.audio-controls button{padding:10px 13px;background:#22483f;color:#eafff9;border:1px solid #5db79f;border-radius:11px;font-weight:800;cursor:pointer}
+.audio-controls{padding:7px 10px;background:#152637;border:1px solid #375265;border-radius:13px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.audio-controls button{padding:6px 9px;min-height:32px;font-size:12px;line-height:1.2;background:#22483f;color:#eafff9;border:1px solid #5db79f;border-radius:9px;font-weight:800;cursor:pointer}
 .audio-controls button.off{background:#25384c;border-color:#536779}.audio-hint{font-size:11px;color:#bed1dd}
 [data-testid="stVideo"]{border-radius:16px;overflow:hidden}
 @media(max-width:700px){[data-testid="stMainBlockContainer"]{padding:.7rem .9rem 2.5rem}.scene{height:250px;border-radius:17px}.scene-text{left:19px;top:22px}.scene-title{font-size:23px}.scene:after{width:230px;height:230px;bottom:-135px;right:-85px}.card{padding:14px;min-height:93px}.card .num{font-size:23px}.alert b{font-size:14px}}
@@ -109,7 +108,8 @@ h1,h2,h3{color:#f0f9ff;letter-spacing:-.04em}
 .cockpit.is-eye{box-shadow:inset 0 0 70px #e63d475c,0 20px 55px #000}
 .cockpit .corner-tag{position:absolute;z-index:5;bottom:17px;left:35px;color:#85e6d2;opacity:.85;font-size:10px;letter-spacing:.15em}
 .monitor-head{display:flex;align-items:center;justify-content:space-between;margin:14px 0;gap:8px}.monitor-head strong{font-size:16px;color:#e8fbfa}.monitor-head small{font-size:11px;color:#6cdbc1}
-.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}.metric-grid .card{min-height:100px;margin:0}
+.metric-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:8px 0}.metric-grid .card{min-height:76px;margin:0;padding:10px}
+.metric-grid .card .num{font-size:22px;margin-top:5px}.metric-grid .card .foot{font-size:10px;margin-top:4px}
 .audio-controls{background:linear-gradient(90deg,#143039,#101d2d);border-color:#326477;margin:0 0 15px;box-shadow:inset 0 1px 0 #9cfde010}
 .audio-controls button{background:#193b38;border-color:#3a9c86}.audio-controls button:first-child{background:#9af6dc;color:#092931;border:0}
 .audio-controls button.off:first-child{background:#334456;color:#d8ebf5}
@@ -204,9 +204,9 @@ def preview_bytes(image):
     if image is None:
         return None
     im = image.copy().convert("RGB")
-    im.thumbnail((192, 128))
+    im.thumbnail((320, 220))
     buf = io.BytesIO()
-    im.save(buf, format="JPEG", quality=78)
+    im.save(buf, format="JPEG", quality=84)
     return buf.getvalue()
 
 
@@ -264,7 +264,6 @@ class CachedMesh:
 class Monitor:
     def __init__(self):
         self.lock = threading.RLock()
-        self.safety = None  # attached by Streamlit main thread
         self.closed_since = None
         self.yawn_since = None
         self.closed_latched = False
@@ -316,8 +315,6 @@ class Monitor:
         self.serial += 1
         self.events.appendleft(dict(시간=datetime.now().strftime("%H:%M:%S"), 감지="눈 감김" if kind == "eye" else "하품", 확률=f"{p:.1%}"))
         self.sounds.append(dict(id=self.serial, kind=kind))
-        if kind == "eye" and self.safety is not None:
-            self.safety.on_eye_warning()
 
     def snapshot(self):
         with self.lock:
@@ -433,8 +430,8 @@ class LatestFrameWorker:
 # =============================================================
 # V5: Car atmosphere is CSS applied AROUND the WebRTC widget.
 # The original video frame is never segmented, filtered, flipped,
-# cropped or annotated for display. Eyes/mouth ROI are extracted
-# privately for inference ONLY, not shown on the live camera feed.
+# cropped or annotated for display. Eye/mouth ROI previews are shown
+# beside the camera, never over the original feed.
 # =============================================================
 
 def cabin_frame_style():
@@ -453,14 +450,15 @@ def cabin_frame_style():
         background-position: center center;
         background-size: cover;
         border: 1px solid #42757b;
-        border-radius: 22px;
-        padding: 22px 18px 18px;
-        box-shadow: 0 20px 48px #0007;
+        border-radius: 16px;
+        padding: 8px;
+        box-shadow: 0 12px 30px #0006;
     }}
     .st-key-aura_camera_frame [data-testid="stWebRtcPlayer"] {{
         border-radius: 14px;
         overflow: hidden;
     }}
+    .st-key-aura_camera_frame video {{max-height: 48vh; object-fit: contain;}}
     @media (max-width: 700px) {{
         .st-key-aura_camera_frame {{padding: 12px 8px; border-radius: 16px;}}
     }}
@@ -507,7 +505,108 @@ def sound_events(events):
     st.html("<script>window.AURA?.sync(" + json.dumps(events) + ");</script>", unsafe_allow_javascript=True)
 
 
-for key, val in {"eye_t": .25, "yawn_t": .15, "eye_s": 2., "yawn_s": 1.5, "stride": 2, "eye_clahe": True, "yawn_color": "RGB (기본)", "aura_demo_fast": False}.items():
+def render_response_simulation():
+    st.html("""<style>
+    .response-demo{overflow:hidden;border:1px solid #345365;border-radius:20px;color:#eaf5fa;
+      background:radial-gradient(ellipse at 75% 0,#174354 0,transparent 45%),linear-gradient(145deg,#132739,#09121e);
+      box-shadow:0 16px 42px #0005}
+    .response-demo *{box-sizing:border-box}
+    .response-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:18px 20px 8px}
+    .response-heading strong{font-size:20px}
+    .response-tag{padding:7px 10px;border:1px solid #9a454d;border-radius:999px;background:#3a1c24;
+      color:#ffb5b8;font-size:10px;font-weight:850;letter-spacing:.08em}
+    .response-note{padding:0 20px 14px;color:#a8bdc9;font-size:12px;line-height:1.55}
+    .response-scene{height:310px;position:relative;overflow:hidden;margin:0 14px;border:1px solid #3b5869;
+      border-radius:16px;background:linear-gradient(180deg,#19374b 0%,#214254 62%,#111d28 63%,#0a1119 100%)}
+    .response-scene:before{content:"";position:absolute;left:4%;right:4%;bottom:22px;height:2px;
+      background:repeating-linear-gradient(90deg,#d9e3dd 0 42px,transparent 42px 78px);opacity:.35}
+    .response-scene:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#07111a55,transparent 50%,#07111a66)}
+    .scene-label{position:absolute;z-index:5;left:14px;top:14px;padding:7px 10px;border-radius:999px;
+      background:#08131ddd;border:1px solid #617988;color:#e1edf0;font-size:10px;font-weight:850;letter-spacing:.08em}
+    .alert-beacon{position:absolute;z-index:4;right:16px;top:14px;color:#ffd9dc;border:1px solid #a74850;
+      background:#471f28d9;border-radius:10px;padding:8px 11px;font-size:11px;font-weight:850;
+      animation:alert-flash 1s steps(2,end) infinite}
+    .scene-road{position:absolute;left:0;right:0;bottom:0;height:35%;background:linear-gradient(180deg,#14202a,#0a1018)}
+    .scene-car{position:absolute;z-index:2;left:24%;bottom:45px;width:210px;height:92px}
+    .scene-car-body{position:absolute;left:0;bottom:0;width:210px;height:54px;border-radius:35px 48px 15px 15px;
+      background:linear-gradient(160deg,#5b7582,#263d4c 66%,#172732);border:1px solid #8da1a7;box-shadow:0 10px 24px #0008}
+    .scene-car-body:before{content:"";position:absolute;left:42px;top:-29px;width:117px;height:42px;
+      border-radius:45px 48px 3px 3px;background:linear-gradient(130deg,#95b2bd,#365365);border:1px solid #98b3ba}
+    .scene-wheel{position:absolute;z-index:2;bottom:-5px;width:37px;height:37px;border:7px solid #71838a;
+      border-radius:50%;background:#101820}
+    .scene-wheel.one{left:28px}.scene-wheel.two{right:25px}
+    .scene-driver{position:absolute;z-index:3;left:87px;bottom:49px;width:48px;height:73px;transform-origin:50% 90%;
+      animation:driver-slump 20s ease-in-out infinite}
+    .scene-driver:before{content:"";position:absolute;left:10px;top:0;width:31px;height:34px;border-radius:48%;
+      background:linear-gradient(140deg,#f0c4a4,#b77e69);border:2px solid #f5d0b6}
+    .scene-driver:after{content:"";position:absolute;left:2px;bottom:0;width:46px;height:44px;border-radius:20px 20px 8px 8px;
+      background:linear-gradient(120deg,#5d8793,#294756)}
+    .ecg-line{position:absolute;z-index:4;left:6%;top:38%;width:48%;height:72px;opacity:0;
+      animation:ecg-show 20s linear infinite;filter:drop-shadow(0 0 7px #ff384d)}
+    .ecg-line:before{content:"";position:absolute;inset:0;background:#ff394d;
+      clip-path:polygon(0 49%,18% 49%,23% 34%,28% 67%,33% 42%,38% 49%,52% 49%,56% 14%,61% 86%,66% 38%,71% 49%,100% 49%,100% 57%,73% 57%,66% 49%,61% 100%,56% 30%,53% 57%,38% 57%,33% 51%,28% 78%,23% 47%,19% 57%,0 57%);
+      animation:ecg-pulse .9s ease-in-out infinite}
+    .ambulance{position:absolute;z-index:3;left:110%;bottom:45px;width:148px;height:77px;
+      animation:ambulance-arrive 20s ease-in-out infinite}
+    .ambulance-body{position:absolute;inset:11px 0 10px;border-radius:12px 20px 8px 8px;
+      background:linear-gradient(180deg,#fff,#d8e2e5);border:2px solid #a9bec5;box-shadow:0 7px 18px #0007}
+    .ambulance-body:before{content:"119";position:absolute;left:54px;top:14px;color:#d82435;font-weight:950;font-size:17px}
+    .ambulance-body:after{content:"";position:absolute;left:10px;top:14px;width:34px;height:23px;border-radius:4px;
+      background:#93c4d2;border:2px solid #f8ffff}
+    .siren{position:absolute;z-index:2;top:3px;left:67px;width:27px;height:10px;border-radius:5px;
+      background:linear-gradient(90deg,#ff293f 0 50%,#258aff 50%);animation:siren-flash .5s steps(2,end) infinite}
+    .ambulance-wheel{position:absolute;z-index:3;bottom:1px;width:23px;height:23px;border:5px solid #536571;
+      border-radius:50%;background:#111b23}
+    .ambulance-wheel.one{left:23px}.ambulance-wheel.two{right:18px}
+    .response-progress{height:5px;margin:12px 18px 0;background:#233b4a;border-radius:9px;overflow:hidden}
+    .response-progress span{display:block;width:0;height:100%;background:linear-gradient(90deg,#55e4bf,#ff4658);
+      animation:progress-fill 20s linear infinite}
+    .response-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:13px 18px 17px}
+    .response-step{padding:10px 8px;border:1px solid #2c4758;border-radius:11px;background:#0d1924;text-align:center}
+    .response-step b{display:block;color:#9bead6;font-size:11px;margin-bottom:4px}
+    .response-step span{color:#a7bac5;font-size:10px;line-height:1.4}
+    .response-disclaimer{margin:0 18px 16px;padding:10px 12px;border:1px solid #74543b;border-radius:10px;
+      background:#2b2118;color:#f5d49b;font-size:11px;line-height:1.5}
+    @keyframes alert-flash{50%{background:#a72331;color:#fff;box-shadow:0 0 18px #ff384d88}}
+    @keyframes siren-flash{50%{filter:brightness(1.8);box-shadow:0 0 18px #ff315dcc}}
+    @keyframes driver-slump{0%,32%{transform:rotate(0) translateY(0)}45%,68%{transform:rotate(33deg) translateY(13px)}78%,100%{transform:rotate(0) translateY(0)}}
+    @keyframes ecg-show{0%,5%{opacity:0}9%,74%{opacity:1}82%,100%{opacity:0}}
+    @keyframes ecg-pulse{50%{filter:brightness(.55);opacity:.72}}
+    @keyframes ambulance-arrive{0%,35%{left:110%}55%,70%{left:66%}100%{left:110%}}
+    @keyframes progress-fill{to{width:100%}}
+    @media(max-width:700px){.response-scene{height:250px}.scene-car{left:8%;transform:scale(.82);transform-origin:bottom left}
+      .ecg-line{left:4%;width:50%}.ambulance{transform:scale(.82);transform-origin:bottom right}
+      .response-steps{gap:4px;padding:10px 8px}.response-step{padding:8px 3px}.response-step span{font-size:8px}}
+    @media(prefers-reduced-motion:reduce){
+      .response-demo *{animation:none!important}
+      .response-progress span{width:100%}.ecg-line{opacity:1}.ambulance{left:66%}
+      .scene-driver{transform:rotate(28deg) translateY(10px)}
+    }
+    </style>
+    <div class="response-demo" aria-label="자동 재생되는 가상 안전 대응 시나리오">
+      <div class="response-heading"><strong>가상 안전 대응 시나리오</strong><span class="response-tag">SIMULATION ONLY · AUTO</span></div>
+      <div class="response-note">경고부터 가상 정차와 모의 구조 도착까지의 흐름을 자동으로 반복 재생합니다.</div>
+      <div class="response-scene">
+        <div class="scene-label">AURA DRIVE · DEMO SCENE</div><div class="alert-beacon">주의 경고 · 대응 흐름 예시</div>
+        <div class="scene-road"></div>
+        <div class="ecg-line" aria-hidden="true"></div>
+        <div class="scene-car"><div class="scene-car-body"></div><div class="scene-wheel one"></div><div class="scene-wheel two"></div><div class="scene-driver"></div></div>
+        <div class="ambulance"><div class="siren"></div><div class="ambulance-body"></div>
+          <div class="ambulance-wheel one"></div><div class="ambulance-wheel two"></div></div>
+      </div>
+      <div class="response-progress"><span></span></div>
+      <div class="response-steps">
+        <div class="response-step"><b>01 · 감지 예시</b><span>눈 감김 경고 표시</span></div>
+        <div class="response-step"><b>02 · 가상 대응</b><span>감속 안내 연출</span></div>
+        <div class="response-step"><b>03 · 정차 가정</b><span>안전 정차 안내</span></div>
+        <div class="response-step"><b>04 · 상황 가정</b><span>무반응은 연출일 뿐</span></div>
+        <div class="response-step"><b>05 · 모의 구조</b><span>119 차량 도착 장면</span></div>
+      </div>
+      <div class="response-disclaimer">가상 연출입니다. 이 모델은 기절·의료 상황을 진단하거나 차량을 제어하지 않으며, 실제 119 신고·출동 요청도 전송하지 않습니다.</div>
+    </div>""")
+
+
+for key, val in {"eye_t": .25, "yawn_t": .15, "eye_s": 2., "yawn_s": 1.5, "stride": 2, "eye_clahe": True, "yawn_color": "RGB (기본)"}.items():
     st.session_state.setdefault(key, val)
 cfg = dict(eye=st.session_state.eye_t, yawn=st.session_state.yawn_t,
            eye_sec=st.session_state.eye_s, yawn_sec=st.session_state.yawn_s,
@@ -516,24 +615,9 @@ paths = model_paths()
 missing = missing_files(paths)
 
 st.html('<div class="brand"><div><b>AURA <span>DRIVE</span></b><br><small>INTELLIGENT DRIVER MONITORING</small></div><small>◉ AI VISION SYSTEM</small></div>')
-page = st.radio("메뉴", ["실시간 모니터", "이미지 분석", "설정"], horizontal=True, label_visibility="collapsed")
+page = st.radio("메뉴", ["실시간 모니터", "이미지 분석", "모의 대응", "설정"], horizontal=True, label_visibility="collapsed")
 
 if page == "실시간 모니터":
-    audio_controls()
-    st.html("""<div class="cockpit" id="aura-cockpit" role="img" aria-label="운전석 시점으로 보이는 앞유리, 도로, 대시보드와 핸들">
-      <div class="sky"></div><div class="sun"></div><div class="mountains"></div><div class="shoulder"></div>
-      <div class="road"></div><div class="roadline"></div><div class="car-ahead"></div>
-      <div class="windshield"></div><div class="pillar-left"></div><div class="pillar-right"></div>
-      <div class="mirror"></div><div class="cabin-glow"></div><div class="dash"></div>
-      <div class="dashboard-strip"><span>AI</span><strong>DRIVE</strong><span>● LIVE</span></div><div class="wheel"></div>
-      <div class="hud"><div class="hud-kicker">● INTELLIGENT DRIVER MONITORING</div>
-        <div class="hud-title">운전석에서 함께하는<br><span>AI 졸음 감지</span></div>
-        <div class="hud-sub">눈을 감거나 하품하면 실시간 경고와<br>선택한 음성으로 알려드립니다.</div>
-        <div class="hud-tags"><span>눈 감김 · YOLO26n</span><span>하품 · ResNet18</span><span>실시간 WebRTC</span></div>
-      </div>
-      <div class="side-status"><span class="led"></span><b id="cockpit-state">SYSTEM READY</b><small id="cockpit-sub">차량 실내 AI 모니터 · 데모</small></div>
-      <div class="corner-tag">FOR DEMONSTRATION ONLY</div>
-    </div>""")
     if missing:
         st.error("모델 파일이 부족해. 설정에서 경로를 확인해줘.")
         for f in missing:
@@ -546,10 +630,6 @@ if page == "실시간 모니터":
             if "aura_m" not in st.session_state:
                 st.session_state.aura_m = Monitor()
             monitor = st.session_state.aura_m
-            if "aura_safety" not in st.session_state or not hasattr(st.session_state.aura_safety, "auto_demo"):
-                st.session_state.aura_safety = SafetySimulation()
-            safety = st.session_state.aura_safety
-            monitor.safety = safety
             if "aura_engine" not in st.session_state or st.session_state.get("aura_paths") != tuple(map(str, paths)):
                 st.session_state.aura_engine = Engine(models, cfg)
                 st.session_state.aura_paths = tuple(map(str, paths))
@@ -562,10 +642,9 @@ if page == "실시간 모니터":
                 st.session_state.aura_worker = LatestFrameWorker(engine, monitor, interval_ms=250, max_width=640)
                 st.session_state.aura_worker_engine = engine
             background_worker = st.session_state.aura_worker
-            a, b = st.columns([1.55, 1], gap="medium")
+            a, b = st.columns([1.15, 1], gap="medium")
             with a:
                 st.html('<div class="monitor-head"><strong>◉ 운전자 실시간 원본 카메라</strong><small>LIVE · ORIGINAL CAMERA</small></div>')
-                st.caption("원본 웹캠 유지 · AI 분석은 백그라운드 처리 · 오래된 프레임 자동 건너뜀")
                 cabin_frame_style()
 
                 # Keep the inference engine and camera processing separate.
@@ -588,9 +667,6 @@ if page == "실시간 모니터":
                         async_processing=True,
                     )
                 st.caption("START → 카메라 권한 허용. 휴대폰 원격 이용 시 HTTPS가 필요할 수 있어.")
-            with b:
-                st.html('<div class="monitor-head"><strong>실시간 분석 패널</strong><small>LIVE INFERENCE</small></div>')
-                st.caption("카메라 START 후 눈 / 입 분석 결과가 바로 표시됩니다.")
 
             @st.fragment(run_every="500ms")
             def live_results():
@@ -606,106 +682,37 @@ if page == "실시간 모니터":
                     ("카메라 FPS", f'{data["fps"]:.1f} FPS' if data["fps"] else "—", "AI 분석과 분리 · 카메라 수신 프레임")]
                 cards = "".join(f'<div class="card"><div class="label">{label}</div><div class="num">{value}</div><div class="foot">{note}</div></div>' for label, value, note in values)
                 st.html('<div class="metric-grid">' + cards + '</div>')
-                st.caption(f'모델 출력 점수 (보정된 확률 아님) · Closed ≥ {cfg["eye"]:.2f} / Yawn ≥ {cfg["yawn"]:.2f}')
-                st.html('<div class="roi-mini-title">◈ MEDIAPIPE · LANDMARK TRACKING <span>LIVE ROI</span></div>')
+                st.caption(f'모델 점수(보정 확률 아님) · 눈 ≥ {cfg["eye"]:.2f} / 하품 ≥ {cfg["yawn"]:.2f}')
+                st.html('<div class="roi-mini-title">◈ 실시간 모델 입력 ROI <span>LIVE · EYE / MOUTH</span></div>')
                 left_roi, right_roi = st.columns(2, gap="small")
                 with left_roi:
-                    if data.get("eye_points"):
-                        st.image(data["eye_points"], caption="👁 EYE · 눈꺼풀 랜드마크", use_container_width=True)
+                    if data.get("eye_roi"):
+                        st.image(data["eye_roi"], caption="👁 눈 ROI · YOLO 입력", use_container_width=True)
                     else:
-                        st.caption("👁 EYE · 랜드마크 미검출")
+                        st.caption("👁 눈 ROI 대기 중")
                 with right_roi:
-                    if data.get("mouth_points"):
-                        st.image(data["mouth_points"], caption="◉ MOUTH · 입술 랜드마크", use_container_width=True)
+                    if data.get("mouth_roi"):
+                        st.image(data["mouth_roi"], caption="◉ 입 ROI · ResNet 입력", use_container_width=True)
                     else:
-                        st.caption("◉ MOUTH · 랜드마크 미검출")
-                with st.expander("실제 모델 입력 이미지 보기", expanded=False):
-                    input_eye, input_mouth = st.columns(2, gap="small")
-                    with input_eye:
-                        if data.get("eye_roi"):
-                            st.image(data["eye_roi"], caption="YOLO 눈 입력 · 점 없음", use_container_width=True)
-                    with input_mouth:
-                        if data.get("mouth_roi"):
-                            st.image(data["mouth_roi"], caption="ResNet 입 입력 · 점 없음", use_container_width=True)
-                st.caption("원본 카메라 → MediaPipe 눈/입 추출 → 개별 전처리 → YOLO / ResNet → 지속시간 경고")
-                # Update HUD state with model outputs without rerunning WebRTC.
-                state_label = "EYES CLOSED" if mode == "eye" else "YAWN WARNING" if mode == "yawn" else "MONITORING" if mode == "ok" else "SYSTEM READY"
-                st.html('<script>(function(){const c=document.querySelector("#aura-cockpit");if(!c)return;c.classList.toggle("is-eye",' + json.dumps(mode == "eye") + ');c.classList.toggle("is-yawn",' + json.dumps(mode == "yawn") + ');let t=document.querySelector("#cockpit-state");if(t)t.textContent=' + json.dumps(state_label) + ';})();</script>', unsafe_allow_javascript=True)
-                st.html('<div class="section">감지 이벤트 기록</div>')
-                if events:
-                    st.dataframe(events, use_container_width=True, hide_index=True)
-                else:
-                    st.caption("아직 발생한 경고가 없어.")
+                        st.caption("◉ 입 ROI 대기 중")
+                with st.expander("랜드마크 및 감지 이벤트", expanded=False):
+                    eye_col, mouth_col = st.columns(2, gap="small")
+                    with eye_col:
+                        if data.get("eye_points"):
+                            st.image(data["eye_points"], caption="눈꺼풀 랜드마크", use_container_width=True)
+                    with mouth_col:
+                        if data.get("mouth_points"):
+                            st.image(data["mouth_points"], caption="입술 랜드마크", use_container_width=True)
+                    if events:
+                        st.dataframe(events, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("아직 발생한 경고가 없어.")
+
             with b:
+                st.html('<div class="monitor-head"><strong>실시간 분석</strong><small>ROI · MODEL OUTPUT</small></div>')
                 live_results()
-
-            st.html("""<style>
-            .aura-safety{background:linear-gradient(125deg,#122a39,#0b1728);border:1px solid #355c70;
-              border-radius:18px;padding:17px 20px;margin:16px 0 8px}
-            .aura-safety .kicker{font-size:11px;letter-spacing:.17em;color:#7ad8c7;font-weight:800}
-            .aura-safety h3{font-size:20px;margin:6px 0;color:#e9f9f7}
-            .aura-safety p{color:#a9c4d0;font-size:13px;margin:5px 0}
-            </style>""")
-            st.html("""<div class="aura-safety"><div class="kicker">AURA RESPONSE · SIMULATION</div>
-               <h3>운전자 안전 대응 시뮬레이션</h3>
-               <p>실시간 경고와 분리된 가상 흐름 · 감속 → 정차·휴식 → 응답 대기 → 모의 SOS</p>
-               <p>실제 차량 제어·창문 작동·긴급 신고는 수행하지 않습니다. 시간은 시연용입니다.</p></div>""")
-
-            @st.fragment(run_every="1s")
-            def safety_panel():
-                safety.configure(st.session_state.get("aura_demo_fast_timing", True))
-                view = safety.tick()
-                names = {"monitor": ("정상 모니터링", "눈 감김 경고 2회/5분이면 가상 정차 시작"),
-                         "stopping": ("가상 감속 중", "안전 정차 시연 · 실제 속도 아님"),
-                         "rest": ("가상 정차 및 휴식", "창문 개방 연출 · 운전자 휴식 안내"),
-                         "ready": ("휴식/응답 확인", "차량은 가상 정지 상태 · 자동 재출발 없음"),
-                         "unresponsive": ("무반응 시나리오 진행", "의식 상태 측정 아님 · 버튼으로 상황을 취소 가능"),
-                         "sos": ("모의 긴급 구조 요청", "119 실제 통화·전송 없음")}
-                title, sub = names[view["mode"]]
-                left, right, third = st.columns([1.1, 1, 1], gap="small")
-                with left:
-                    st.metric("대응 상태", title)
-                    st.caption(sub)
-                with right:
-                    st.metric("가상 차량 속도", f'{view["speed"]:.0f} km/h')
-                    st.caption("실제 운행·제동과 연결되지 않음")
-                with third:
-                    st.metric("최근 5분 눈 감김 경고", f'{view["recent_eye_events"]}회')
-                    st.caption("2초 이상 눈 감김 경고 이벤트 기준")
-                if view.get("auto_demo", False):
-                    st.caption("자동 시연 진행 중 · 시작 시 입력된 눈 감김 경고는 모의 이벤트이며 실제 감지값이 아닙니다.")
-                if view["mode"] == "stopping":
-                    st.progress(max(0., min(1., 1. - view["speed"] / 80.)))
-                    st.warning("가상 감속 중 · 실제 차량에서는 검증된 안전 정지 시스템이 필요합니다.")
-                elif view["mode"] == "rest":
-                    st.success("가상 안전 정차 완료 · 창문 열림(연출) · 휴식 권고")
-                    st.progress(1. - view["rest_remaining"] / (15. if view["demo_fast"] else 300.))
-                    st.caption(f'가상 휴식 권고 남은 시간: {view["rest_remaining"]:.0f}초')
-                elif view["mode"] == "unresponsive":
-                    st.error("무반응 시나리오: 운전자 반응을 확인하세요. 실제 응급상황이면 지체 없이 구조를 요청해야 합니다.")
-                    st.caption(f'모의 SOS 화면 전환까지: {view["response_remaining"]:.0f}초')
-                    st.progress(1. - view["response_remaining"] / (30. if view["demo_fast"] else 600.))
-                elif view["mode"] == "sos":
-                    st.error("🚨 모의 119 구조 요청 화면 · 실제 신고는 하지 않았습니다.")
-                    st.info("실제 적용에는 검증된 차량 안전 시스템과 별도 긴급 신고 연동 및 법규 준수가 필요합니다.")
-                elif view["mode"] == "ready":
-                    st.info("휴식이 끝났거나 응답을 확인했어요. 자동 주행 재개는 지원하지 않습니다.")
-
-                st.caption("빠른 시연은 휴식 15초·무반응 30초로 압축합니다. 일반 시나리오는 5분·10분이며 안전·의료 기준이 아닙니다.")
-                st.checkbox("빠른 발표 시연 (시간 압축)", value=True, key="aura_demo_fast_timing")
-                b1,b2,b3 = st.columns(3, gap="small")
-                with b1:
-                    if st.button("▶ 자동 시연 시작", type="primary", use_container_width=True, key="safety_auto_demo"):
-                        safety.start_auto_demo(); st.rerun(scope="fragment")
-                with b2:
-                    if st.button("✅ 운전자 반응 확인", use_container_width=True, key="safety_ack"):
-                        safety.respond(); st.rerun(scope="fragment")
-                with b3:
-                    if st.button("↺ 시뮬레이션 초기화", use_container_width=True, key="safety_reset"):
-                        safety.reset(); st.rerun(scope="fragment")
-                with st.expander("안전 대응 이벤트 기록", expanded=False):
-                    st.dataframe(view["events"], hide_index=True, use_container_width=True)
-            safety_panel()
+                with st.expander("사운드 알림 설정", expanded=False):
+                    audio_controls()
         except Exception as exc:
             st.error(f"실시간 모니터 초기화 실패: {type(exc).__name__}: {exc}")
             st.code("python -m pip install --upgrade --force-reinstall 'mediapipe==0.10.21' 'protobuf>=4.25.3,<5'")
@@ -748,6 +755,8 @@ elif page == "이미지 분석":
                         st.image(r["eye_processed"], caption="눈 모델 실제 입력 · 전처리 적용 ROI", width=224)
         except Exception as exc:
             st.error(f"이미지 분석 오류: {type(exc).__name__}: {exc}")
+elif page == "모의 대응":
+    render_response_simulation()
 else:
     st.html('<div class="section">⚙️ CONFIGURATION</div>')
     st.text_input("YOLO26n 눈 모델 경로", value=str(ROOT / "runs/eyes_yolo26n-cls/weights/best.pt"), key="eyes_path")
@@ -764,8 +773,7 @@ else:
         st.slider("하품 판정 임계값", .05, .95, step=.05, key="yawn_t")
         st.slider("하품 지속시간(초)", .5, 5., step=.5, key="yawn_s")
     st.slider("추론 간격(프레임)", 1, 6, key="stride")
-    st.checkbox("빠른 시연 모드 (5분 휴식→15초 / 10분 무반응→30초)", key="aura_demo_fast")
-    st.caption("기본 시연 규칙: 눈 감김 경고 5분 내 2회 → 가상 감속/정차 → 휴식 권고. 무반응은 실제 측정값이 아니라 버튼으로 시작하는 별도 시나리오입니다.")
+    st.caption("상단의 모의 대응 메뉴에서 자동 재생되는 가상 경고·정차·구조 시나리오를 볼 수 있습니다. 무반응/기절 판단, 차량 제어, 실제 신고를 수행하지 않습니다.")
     st.caption("🚘 차량 실내 사진은 라이브 카메라 바깥 프레임의 배경으로만 사용돼. 웹캠 원본은 변경하지 않아. 설정 변경은 카메라 재시작 후 적용하는 게 안전해.")
     st.info("눈: CLAHE + 0.25, 하품: RGB + 0.15는 외부 개발셋 기반 후보 설정입니다. 하품 0.10 및 0.50과 실시간 비교 후 최종 확정하세요.")
 
