@@ -546,7 +546,7 @@ if page == "실시간 모니터":
             if "aura_m" not in st.session_state:
                 st.session_state.aura_m = Monitor()
             monitor = st.session_state.aura_m
-            if "aura_safety" not in st.session_state:
+            if "aura_safety" not in st.session_state or not hasattr(st.session_state.aura_safety, "auto_demo"):
                 st.session_state.aura_safety = SafetySimulation()
             safety = st.session_state.aura_safety
             monitor.safety = safety
@@ -648,12 +648,12 @@ if page == "실시간 모니터":
             </style>""")
             st.html("""<div class="aura-safety"><div class="kicker">AURA RESPONSE · SIMULATION</div>
                <h3>운전자 안전 대응 시뮬레이션</h3>
-               <p>반복 눈 감김 → 가상 감속·안전 정차 → 5분 휴식 · 무반응 시나리오 → 모의 119 안내</p>
-               <p>실제 차량 제어, 창문 작동, 긴급 신고는 수행하지 않습니다.</p></div>""")
+               <p>실시간 경고와 분리된 가상 흐름 · 감속 → 정차·휴식 → 응답 대기 → 모의 SOS</p>
+               <p>실제 차량 제어·창문 작동·긴급 신고는 수행하지 않습니다. 시간은 시연용입니다.</p></div>""")
 
             @st.fragment(run_every="1s")
             def safety_panel():
-                safety.configure(st.session_state.get("aura_demo_fast", False))
+                safety.configure(st.session_state.get("aura_demo_fast_timing", True))
                 view = safety.tick()
                 names = {"monitor": ("정상 모니터링", "눈 감김 경고 2회/5분이면 가상 정차 시작"),
                          "stopping": ("가상 감속 중", "안전 정차 시연 · 실제 속도 아님"),
@@ -672,6 +672,8 @@ if page == "실시간 모니터":
                 with third:
                     st.metric("최근 5분 눈 감김 경고", f'{view["recent_eye_events"]}회')
                     st.caption("2초 이상 눈 감김 경고 이벤트 기준")
+                if view.get("auto_demo", False):
+                    st.caption("자동 시연 진행 중 · 시작 시 입력된 눈 감김 경고는 모의 이벤트이며 실제 감지값이 아닙니다.")
                 if view["mode"] == "stopping":
                     st.progress(max(0., min(1., 1. - view["speed"] / 80.)))
                     st.warning("가상 감속 중 · 실제 차량에서는 검증된 안전 정지 시스템이 필요합니다.")
@@ -682,24 +684,23 @@ if page == "실시간 모니터":
                 elif view["mode"] == "unresponsive":
                     st.error("무반응 시나리오: 운전자 반응을 확인하세요. 실제 응급상황이면 지체 없이 구조를 요청해야 합니다.")
                     st.caption(f'모의 SOS 화면 전환까지: {view["response_remaining"]:.0f}초')
+                    st.progress(1. - view["response_remaining"] / (30. if view["demo_fast"] else 600.))
                 elif view["mode"] == "sos":
                     st.error("🚨 모의 119 구조 요청 화면 · 실제 신고는 하지 않았습니다.")
                     st.info("실제 적용에는 검증된 차량 안전 시스템과 별도 긴급 신고 연동 및 법규 준수가 필요합니다.")
                 elif view["mode"] == "ready":
                     st.info("휴식이 끝났거나 응답을 확인했어요. 자동 주행 재개는 지원하지 않습니다.")
 
-                st.caption("운전자의 나이·지병만으로 차량을 감속하거나 응급 신고하지 않습니다. 10분은 데모 시나리오일 뿐 의료 기준이 아닙니다.")
-                b1,b2,b3,b4 = st.columns(4, gap="small")
+                st.caption("빠른 시연은 휴식 15초·무반응 30초로 압축합니다. 일반 시나리오는 5분·10분이며 안전·의료 기준이 아닙니다.")
+                st.checkbox("빠른 발표 시연 (시간 압축)", value=True, key="aura_demo_fast_timing")
+                b1,b2,b3 = st.columns(3, gap="small")
                 with b1:
-                    if st.button("🚘 가상 안전 정차", use_container_width=True, key="safety_demo_stop"):
-                        safety.start_stop_demo(); st.rerun(scope="fragment")
+                    if st.button("▶ 자동 시연 시작", type="primary", use_container_width=True, key="safety_auto_demo"):
+                        safety.start_auto_demo(); st.rerun(scope="fragment")
                 with b2:
-                    if st.button("🆘 무반응 테스트", use_container_width=True, key="safety_demo_unresponsive"):
-                        safety.start_unresponsive_demo(); st.rerun(scope="fragment")
-                with b3:
                     if st.button("✅ 운전자 반응 확인", use_container_width=True, key="safety_ack"):
                         safety.respond(); st.rerun(scope="fragment")
-                with b4:
+                with b3:
                     if st.button("↺ 시뮬레이션 초기화", use_container_width=True, key="safety_reset"):
                         safety.reset(); st.rerun(scope="fragment")
                 with st.expander("안전 대응 이벤트 기록", expanded=False):

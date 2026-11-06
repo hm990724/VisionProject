@@ -14,3 +14,5 @@ protobuf>=4.25.3,<5
 opencv-contrib-python>=4.8,<4.12
 torch
 torchvision
+# Optional dependency for rebuilding the PPTX/PDF presentation.
+python-pptx>=1.0,<2

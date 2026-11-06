@@ -27,6 +27,7 @@ class SafetySimulation:
         self.rest_start = None
         self.unresponsive_start = None
         self.demo_fast = False
+        self.auto_demo = False
         self.acknowledged = False
         self.last_eye_event = None
         self._last_tick = time.monotonic()
@@ -66,12 +67,24 @@ class SafetySimulation:
     def start_stop_demo(self, now=None):
         now = time.monotonic() if now is None else now
         with self.lock:
+            self.auto_demo = False
             self.eye_events.clear()
             self._begin_stop(now)
+
+    def start_auto_demo(self, now=None):
+        now = time.monotonic() if now is None else now
+        with self.lock:
+            self.mode = "monitor"
+            self.eye_events.clear()
+            self.auto_demo = True
+            self.on_eye_warning(now)
+            self.on_eye_warning(now)
+            self._log("자동 시연 시작", "모의 눈 감김 경고 2회 입력 · 실제 감지 결과 아님")
 
     def start_unresponsive_demo(self, now=None):
         now = time.monotonic() if now is None else now
         with self.lock:
+            self.auto_demo = False
             self.mode = "unresponsive"
             self.unresponsive_start = now
             self.stop_start = None
@@ -91,6 +104,7 @@ class SafetySimulation:
                 self.window_open = False
                 self.unresponsive_start = None
                 self.acknowledged = True
+                self.auto_demo = False
                 self.eye_events.clear()
                 self._log("운전자 응답", "가상 정차 유지 · 재출발은 별도 승인")
 
@@ -98,6 +112,7 @@ class SafetySimulation:
         now = time.monotonic() if now is None else now
         with self.lock:
             self.mode = "monitor"
+            self.auto_demo = False
             self.speed = 80.0
             self.window_open = False
             self.stop_start = None
@@ -123,9 +138,14 @@ class SafetySimulation:
             elif self.mode == "rest":
                 required = 15.0 if self.demo_fast else 300.0
                 if self.rest_start is not None and now - self.rest_start >= required:
-                    self.mode = "ready"
                     self.window_open = False
-                    self._log("휴식 시간 종료", "자동 재출발 없음 · 운전자 확인 필요")
+                    if self.auto_demo:
+                        self.mode = "unresponsive"
+                        self.unresponsive_start = now
+                        self._log("무반응 시나리오", "자동 시연 타이머 시작 · 실제 의식 상태 측정 아님")
+                    else:
+                        self.mode = "ready"
+                        self._log("휴식 시간 종료", "자동 재출발 없음 · 운전자 확인 필요")
             elif self.mode == "unresponsive":
                 required = 30.0 if self.demo_fast else 600.0
                 if self.unresponsive_start is not None and now - self.unresponsive_start >= required:
@@ -145,4 +165,5 @@ class SafetySimulation:
             return {"mode": self.mode, "speed": self.speed, "window_open": self.window_open,
                     "recent_eye_events": len(self.eye_events), "rest_remaining": rest_remaining,
                     "response_remaining": response_remaining, "demo_fast": self.demo_fast,
-                    "events": list(self.activity_log), "acknowledged": self.acknowledged}
+                    "auto_demo": self.auto_demo, "events": list(self.activity_log),
+                    "acknowledged": self.acknowledged}
