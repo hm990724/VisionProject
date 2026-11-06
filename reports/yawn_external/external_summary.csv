@@ -1,0 +1,3 @@
+﻿task,condition,model,total,valid,roi_fail,errors,correct,overall_accuracy,detected_only_accuracy,positive_recall,positive_precision,positive_f1,fp,fn
+yawn,ALL,team_resnet18,1448,1429,19,0,1423,0.9827,0.9958,0.9765,0.9972,0.9867,2,17
+yawn,normal,team_resnet18,1448,1429,19,0,1423,0.9827,0.9958,0.9765,0.9972,0.9867,2,17

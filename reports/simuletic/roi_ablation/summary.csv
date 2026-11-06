@@ -1,0 +1,4 @@
+﻿model,variant,total,correct,roi_success,roi_fail,errors,overall_accuracy,detected_accuracy,closed_recall,open_recall,open_false_alarm_rate,fp_open_as_closed,fn_closed_as_open
+yolo26n,baseline,143,139,140,3,0,0.97203,0.99286,0.97059,0.97561,0.02439,1,0
+yolo26n,clahe,143,140,140,3,0,0.97902,1.0,0.97059,1.0,0.0,0,0
+yolo26n,tight_85,143,139,140,3,0,0.97203,0.99286,0.97059,0.97561,0.02439,1,0

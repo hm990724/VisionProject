@@ -1,4 +1,16 @@
+# VisionProject | AURA DRIVE (Windows / Python 3.10)
+# Eyes: Ultralytics YOLO26n · Yawn: torchvision ResNet18
+# Web: Streamlit / streamlit-webrtc, browser audio alerts via st.html JS
 ultralytics
-streamlit
+streamlit>=1.52,<2
+streamlit-webrtc>=0.75,<1
+av>=15.1
 pillow
-numpy
+numpy>=1.24,<2
+# MediaPipe 0.10.21 uses legacy FaceMesh and Tasks APIs.
+mediapipe==0.10.21
+protobuf>=4.25.3,<5
+# mediapipe already depends on opencv-contrib-python; avoid a second cv2 wheel.
+opencv-contrib-python>=4.8,<4.12
+torch
+torchvision

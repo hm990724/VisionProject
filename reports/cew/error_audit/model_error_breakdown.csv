@@ -1,0 +1,4 @@
+﻿model,total,correct,roi_fail,error,closed_as_open,open_as_closed,other
+yolo26n,2423,1917,34,0,40,432,0
+resnet18,2423,1967,34,0,119,303,0
+mobilenet_v3_small,2423,1976,34,0,298,115,0

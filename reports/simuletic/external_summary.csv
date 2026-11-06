@@ -1,0 +1,7 @@
+﻿task,condition,model,total,valid,roi_fail,errors,correct,overall_accuracy,detected_only_accuracy,positive_recall,positive_precision,positive_f1,fp,fn
+eyes,ALL,mobilenet_v3_small,143,140,3,0,107,0.7483,0.7643,0.6471,1.0,0.7857,0,36
+eyes,ALL,resnet18,143,140,3,0,140,0.979,1.0,0.9706,1.0,0.9851,0,3
+eyes,ALL,yolo26n,143,140,3,0,139,0.972,0.9929,0.9706,0.99,0.9802,1,3
+eyes,simuletic,mobilenet_v3_small,143,140,3,0,107,0.7483,0.7643,0.6471,1.0,0.7857,0,36
+eyes,simuletic,resnet18,143,140,3,0,140,0.979,1.0,0.9706,1.0,0.9851,0,3
+eyes,simuletic,yolo26n,143,140,3,0,139,0.972,0.9929,0.9706,0.99,0.9802,1,3

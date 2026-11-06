@@ -1,0 +1,5 @@
+﻿variant,threshold,total,valid,unknown,errors,tp,tn,fp,fn_including_unknown,overall_accuracy,valid_accuracy,yawn_recall,precision,f1,open_false_alarm_rate
+baseline,0.5,393,344,49,0,76,182,13,95,0.65649,0.75,0.44444,0.85393,0.58462,0.05856
+tight_85,0.5,393,344,49,0,73,185,10,98,0.65649,0.75,0.4269,0.87952,0.5748,0.04505
+soft_color,0.5,393,344,49,0,77,183,12,94,0.66158,0.75581,0.45029,0.86517,0.59231,0.05405
+grayscale,0.5,393,344,49,0,89,175,20,82,0.67176,0.76744,0.52047,0.81651,0.63571,0.09009
