@@ -1,0 +1,927 @@
+SLIDE 1
+
+
+
+AI DRIVER SAFETY  /  VALIDATION FIRST
+AURA
+DRIVE
+눈 감김 · 하품 · 위험 대응 시뮬레이션
+내부 100%라는 숫자에서 시작해, 외부 실패와 실제 개선을 검증하다
+
+VISION PROJECT  ·  FINAL PRESENTATION
+
+SLIDE 2
+
+
+AURA DRIVE
+EXECUTIVE SUMMARY
+핵심 메시지 세 가지
+모델 정확도뿐 아니라, 실패 조건과 시스템의 대응까지 다뤘습니다.
+
+RESEARCH PROTOTYPE  •  2026.11.06
+02
+
+
+2,900
+원본 이미지
+Closed / Open / yawn / no_yawn
+
+
+88.36%
+눈 외부 CEW
+YOLO26n + CLAHE · 임계값 0.25
+
+
+71.50%
+하품 외부 Roboflow
+ResNet18 RGB · 임계값 0.10
+
+발견  →  분석  →  개선  →  실사용 검토
+성능 개선은 입증된 범위 안에서만 주장하며, 안전 정지는 시뮬레이션으로 한정
+
+SLIDE 3
+
+
+AURA DRIVE
+PROBLEM
+내부 테스트만으로는 충분하지 않았습니다
+같은 모델, 다른 이미지 출처 — 일반화 성능의 격차
+
+RESEARCH PROTOTYPE  •  2026.11.06
+03
+
+
+EYE / YOLO26n
+100%
+내부 Test
+
+
+79.12%
+CEW 외부 2,423장
+YAWN / TEAM RESNET18
+99.06%
+내부 ROI 성공분 Test
+
+
+65.65%
+Roboflow 외부 393장
+핵심 질문   “성능이 낮아진 이유는 무엇인가?”
+
+SLIDE 4
+
+
+AURA DRIVE
+SYSTEM ARCHITECTURE
+카메라 한 대에서 두 개의 AI 모델로
+원본 프레임에는 시각화만, 모델에는 랜드마크 없는 ROI만 전달
+
+RESEARCH PROTOTYPE  •  2026.11.06
+04
+
+01
+RGB 웹캠
+입력 프레임
+
+
+
+02
+MediaPipe
+눈 · 입 ROI
+
+
+
+03
+전처리
+CLAHE / RGB
+
+
+
+04
+AI 분류
+YOLO · ResNet
+
+
+
+05
+이벤트
+시간 · 횟수
+
+
+
+06
+UI · 경고
+알림 · 모의 대응
+
+눈 → P(Closed) ≥ 0.25
+
+하품 → P(yawn) ≥ 0.10~0.15
+※ 임계값은 개발용 데이터에서 찾은 통합 후보이며, 실제 현장 성능 확정값이 아닙니다.
+
+SLIDE 5
+
+
+AURA DRIVE
+DATA FOUNDATION
+출발점은 원본 이미지 2,900장
+4개 클래스 / JPEG·PNG / 224 × 224 입력 규격
+
+RESEARCH PROTOTYPE  •  2026.11.06
+05
+
+Closed
+726
+
+
+Open
+726
+
+
+no_yawn
+725
+
+
+yawn
+723
+
+
+원본 검사  →  손상 확인  →  중복·유사 이미지 확인  →  그룹 분할
+
+SLIDE 6
+
+
+AURA DRIVE
+DATA AUDIT
+같은 사람의 비슷한 프레임이 섞이지 않도록
+완전 중복 0건만으로 유사 프레임 문제는 해결되지 않습니다.
+
+RESEARCH PROTOTYPE  •  2026.11.06
+06
+
+
+MD5 / SHA-256
+같은 파일의 완전 중복 여부 확인
+
+
+dHash / 유사도
+리사이즈·조명 변화에도 비슷한 이미지 그룹 탐색
+
+
+Group Split
+유사 이미지 그룹이 학습/평가에 교차하지 않도록 분할
+
+남은 한계 : 원본 인물 ID가 없어 “사람 단위 독립성”은 보장되지 않음
+
+SLIDE 7
+
+
+AURA DRIVE
+DATA SPLIT
+모델마다 Train / Val / Test를 분리
+눈과 하품은 별도 데이터로 학습 · 최종 Test는 개발 중 튜닝에 사용하지 않는 것이 원칙
+
+RESEARCH PROTOTYPE  •  2026.11.06
+07
+
+눈
+
+Train 1017
+
+Validation 218
+
+Test 217
+
+하품
+
+Train 1016
+
+Validation 218
+
+Test 214
+눈 총 1,452장  /  하품 총 1,448장
+
+SLIDE 8
+
+
+AURA DRIVE
+EXTERNAL EVALUATION
+외부 평가를 세 가지 환경으로 확장
+눈 모델의 일반화는 얼굴 사진 · 잘린 눈 패치 · 운전석 이미지로 확인
+
+RESEARCH PROTOTYPE  •  2026.11.06
+08
+
+
+2,423
+CEW
+얼굴 원본 → MediaPipe ROI
+
+
+4,000
+MRL
+이미 잘린 눈 ROI · 중복 가능성
+
+
+143
+Simuletic DMS
+Closed 102 + Open 41; 보류 25
+
+외부 평가 = “같은 모델을 다른 출처·입력조건으로 시험”
+
+SLIDE 9
+
+
+AURA DRIVE
+MODEL TRAINING
+눈 모델을 공통 환경에서 비교
+전이학습 / 224×224 / Batch 16 / 최대 25 Epoch / Early stopping patience 7
+
+RESEARCH PROTOTYPE  •  2026.11.06
+09
+
+YOLO26N-CLS
+BEST 06
+STOP 13
+사전학습 가중치 기반
+
+RESNET18
+VAL 100% / E03
+STOP 10
+사전학습 가중치 기반
+
+MOBILENETV3-SMALL
+VAL 100% / E02
+STOP 09
+사전학습 가중치 기반
+중요 : 최고 성능 Epoch와 학습 종료 Epoch는 다르게 기록합니다.
+
+SLIDE 10
+
+
+AURA DRIVE
+MODEL SELECTION
+내부 Test는 세 모델 모두 100%
+동일한 정답률이라면 CPU 추론 속도까지 함께 고려
+
+RESEARCH PROTOTYPE  •  2026.11.06
+10
+YOLO26n
+
+
+11.4ms
+MobileNetV3
+
+
+14.7ms
+ResNet18
+
+
+25.7ms
+
+이 값은 기존 비교 스크립트 측정치로, 순수 모델 연산만의 공정한 속도 비교는 아님
+
+SLIDE 11
+
+
+AURA DRIVE
+EYE GENERALIZATION
+외부로 나가면 모델 순위가 달라집니다
+모든 값은 ROI 실패를 오답으로 포함한 전체 파이프라인 정확도
+
+RESEARCH PROTOTYPE  •  2026.11.06
+11
+
+CEW
+79.12%
+81.18%
+81.55%
+
+MRL
+98.80%
+99.95%
+99.70%
+
+Simuletic
+97.20%
+97.90%
+74.83%
+YOLO26n
+ResNet18
+MobileNetV3
+
+SLIDE 12
+
+
+AURA DRIVE
+EYE ERROR AUDIT
+CEW 오분류를 실제 눈 패치로 확인
+기존 자료에 포함된 실제 CEW ROI 캡처 — 낮은 품질의 원본 패치
+
+RESEARCH PROTOTYPE  •  2026.11.06
+12
+
+눈꺼풀 경계가 흐릿한 사례
+
+432
+Open → Closed 오탐
+
+40
+Closed → Open 미탐
+관찰: 안경테 · 눈썹 · 저화질 영향 가능성 — 원인으로 단정하지 않음
+
+SLIDE 13
+
+
+AURA DRIVE
+PREPROCESSING
+눈 ROI의 밝기 대비만 조정해 보았습니다
+CLAHE: 컬러를 유지하며 LAB 밝기 채널의 국소 대비를 보정
+
+RESEARCH PROTOTYPE  •  2026.11.06
+13
+
+
+
+BEFORE / ORIGINAL
+기존 눈 ROI
+
+AFTER / CLAHE
+CLAHE 보정 ROI
+※ 위 예시는 동일 ROI 패치에 CLAHE를 적용한 시각 예시이며, 모델 성능은 전체 데이터 결과로 평가함.
+
+SLIDE 14
+
+
+AURA DRIVE
+EYE THRESHOLD
+“잘 잡음”과 “잘못 울림”의 균형
+CEW 2,423장 기준. Closed Recall과 정상 눈 오탐률을 함께 비교
+
+RESEARCH PROTOTYPE  •  2026.11.06
+14
+
+Baseline 0.50
+Recall
+
+
+94.21%
+FPR
+35.09%
+
+CLAHE 0.50
+Recall
+
+
+81.12%
+FPR
+3.17%
+
+CLAHE 0.25
+Recall
+
+
+90.69%
+FPR
+13.48%
+
+SLIDE 15
+
+
+AURA DRIVE
+EYE CROSS CHECK
+운전석 이미지에서는 143장 중 140장 정답
+Simuletic: Closed 102 · Open 41 · Drowsy/Microsleep 25 보류
+
+RESEARCH PROTOTYPE  •  2026.11.06
+15
+
+
+97.90%
+CLAHE + 0.25
+전체 140/143 정답
+
+
+0건
+정상 눈 오탐
+Open 41장 중 FP 0
+
+
+3장
+눈 ROI 검출 실패
+driver_full_sleep2의 고개 숙임
+
+UNKNOWN은 “모델이 틀렸다”가 아니라 “판단할 눈이 보이지 않았다”는 신호
+
+SLIDE 16
+
+
+AURA DRIVE
+REAL-TIME VALIDATION
+웹캠으로는 경고 이벤트까지 확인
+인물 배경 분리 없음 · 원본 영상과 동일 ROI에 A/B 처리
+
+RESEARCH PROTOTYPE  •  2026.11.06
+16
+
+2회
+장시간 눈 감김
+
+기존 · 개선 방식 모두
+경고 2회 발생
+O/C 수동 라벨 입력 타이밍 오차 → 웹캠 프레임별 정확도는 별도 확정하지 않음
+
+SLIDE 17
+
+PART 02 / YAWN GENERALIZATION
+하품 모델은 왜 외부에서 달라졌을까?
+모델을 바꾸기 전에, 입력과 오분류의 방향부터 살폈습니다.
+AURA DRIVE  /  2026.11.06
+17
+
+SLIDE 18
+
+
+AURA DRIVE
+YAWN MODEL
+하품 모델은 팀원 ResNet18을 사용
+MediaPipe Mouth ROI · ImageNet 전이학습 · RGB / 224×224
+
+RESEARCH PROTOTYPE  •  2026.11.06
+18
+
+ResNet18
+99.06%
+내부 Test · ROI 성공분
+
+Best 10  /  Stop 17
+
+MobileNetV3
+97.64%
+내부 Test · ROI 성공분
+
+Best 6  /  Stop 13
+
+EfficientNet-B0
+97.64%
+내부 Test · ROI 성공분
+
+Best 12  /  Stop 19
+공통: 최대 25 Epoch · Batch 16 · LR 1e-4 · AdamW · Warmup 2 · Patience 7
+
+SLIDE 19
+
+
+AURA DRIVE
+YAWN EXTERNAL
+외부 Roboflow: 99.06% → 65.65%
+새로운 얼굴 사진 393장: yawn 171 / no_yawn 222
+
+RESEARCH PROTOTYPE  •  2026.11.06
+19
+
+
+65.65%
+전체 정확도
+258 / 393
+
+
+44.44%
+하품 Recall
+실제 하품 171장 중 76장
+
+
+49장
+입 ROI 실패
+344 / 393 추출 성공
+
+입 ROI가 성공한 344장에서도 86장 오분류 → MediaPipe만의 문제가 아님
+
+SLIDE 20
+
+
+AURA DRIVE
+YAWN ERROR AUDIT
+입이 보이는데도 오분류했습니다
+기존 실험에서 사용한 실제 Mouth ROI 캡처
+
+RESEARCH PROTOTYPE  •  2026.11.06
+20
+
+
+비하품 → 하품 오탐
+13장
+입 모양·주변 특징 영향 의심
+하품 → 비하품 미탐
+73장
+입술 색 · 목 주름 영향 가설
+이미지의 특징과 오분류가 함께 나타났다는 관찰일 뿐, 모델의 주의 지점을 확정한 증거는 아님
+
+SLIDE 21
+
+
+AURA DRIVE
+YAWN PREPROCESS
+흑백 변환은 Recall을 올렸지만 오탐도 증가
+동일 ResNet18 가중치 / 임계값 0.50 / ROI 실패 49장 동일
+
+RESEARCH PROTOTYPE  •  2026.11.06
+21
+
+RGB 원본
+Recall 44.44%
+F1 58.46%
+FP 13
+
+Tight 85%
+Recall 42.69%
+F1 57.48%
+FP 10
+
+Soft Color
+Recall 45.03%
+F1 59.23%
+FP 12
+
+Grayscale
+Recall 52.05%
+F1 63.57%
+FP 20
+
+결론: 전처리만으로 해결되지 않음. 임계값과 데이터 다양성까지 고려
+
+SLIDE 22
+
+
+AURA DRIVE
+YAWN THRESHOLD
+하품은 RGB + 낮은 임계값이 더 균형적
+Roboflow 393장에서 4 전처리 × 19 임계값 = 76개 조합 비교
+
+RESEARCH PROTOTYPE  •  2026.11.06
+22
+
+RGB 0.50
+65.65%
+정확도
+Recall 44.44%
+FP 13
+
+RGB 0.10
+71.50%
+정확도
+Recall 66.67%
+FP 28
+
+RGB 0.15
+71.50%
+정확도
+Recall 64.33%
+FP 24
+
+Gray 0.10
+61.83%
+정확도
+Recall 67.84%
+FP 68
+현재 통합 후보: RGB + 0.10 / 0.15  ·  실제 웹캠 경고 이벤트 검증 필요
+
+SLIDE 23
+
+
+AURA DRIVE
+MODEL DECISION
+현재 모델 통합 후보는 두 가지
+두 모델을 새로 학습하지 않고, 기존 가중치로 전처리와 임계값만 분리
+
+RESEARCH PROTOTYPE  •  2026.11.06
+23
+
+EYE
+YOLO26n-cls
+MediaPipe Eye ROI
+CLAHE   •   P(Closed) ≥ 0.25
+
+YAWN
+ResNet18
+MediaPipe Mouth ROI
+RGB   •   P(yawn) ≥ 0.10~0.15
+※ 최종 “제품 성능”이 아니라 개발 데이터에서 선정한 현재 통합 후보
+
+SLIDE 24
+
+
+AURA DRIVE
+PRODUCT EXPERIENCE
+AURA DRIVE: 사용자는 상태를 한눈에
+원본 카메라 + 눈·입 실시간 확률 + ROI/랜드마크 + 경고/음향
+
+RESEARCH PROTOTYPE  •  2026.11.06
+24
+
+01
+원본 웹캠 유지
+02
+눈·하품 확률
+03
+작은 ROI 화면
+04
+오디오 경고
+05
+가상 안전 대응
+
+SLIDE 25
+
+
+AURA DRIVE
+REALTIME ENGINEERING
+웹캠 지연은 “추론 구조”의 문제
+기존 v7 → 영상 반환 전 MediaPipe·YOLO·ResNet 실행으로 프레임 지연
+
+RESEARCH PROTOTYPE  •  2026.11.06
+25
+
+BEFORE
+캡처 → 전처리 → 추론 → 화면 반환
+AI가 느려지면 카메라도 느려짐
+
+AFTER / v8+
+원본 프레임 즉시 반환
+AI는 최신 프레임만 별도 분석
+이전 결과는 STALE/UNKNOWN 구분
+
+SLIDE 26
+
+
+AURA DRIVE
+SAFETY SIMULATION
+졸음 2회 이상이면 “대응 단계”로
+5분 내 독립된 장시간 눈 감김 경고 2회 → 가상 감속·안전 정차
+
+RESEARCH PROTOTYPE  •  2026.11.06
+26
+
+
+1
+정상
+모니터링
+
+
+
+
+2
+주의
+경고음
+
+
+
+
+3
+위험
+반복 감김
+
+
+
+
+4
+대응
+가상 정차
+
+
+
+
+5
+휴식
+재확인
+
+시뮬레이션 전용: 실제 브레이크 · 창문 · 119 통화는 실행하지 않습니다.
+
+SLIDE 27
+
+
+AURA DRIVE
+SAFETY WORKFLOW
+무반응: 응급 대응 경로는 별도로
+의식 상실을 진단하지 않고 “반응 확인 필요 상태”로 표현
+
+RESEARCH PROTOTYPE  •  2026.11.06
+27
+
+
+경고
+눈 감김 지속 · 졸음 반복 시 운전자 확인 요청
+
+
+무반응 의심
+확인 버튼/시뮬레이션 신호가 지속적으로 없는 상태
+
+
+긴급 대응
+가상 정차·모의 SOS UI 및 이벤트 로그
+
+5분 휴식 · 10분 무반응은 발표용 시나리오 시간이며 의료·차량 안전 기준이 아님
+
+SLIDE 28
+
+
+AURA DRIVE
+COMMERCIAL BENCHMARK
+테슬라는 무엇을 사용하나?
+공식 매뉴얼 기준: 선글라스 감시 “가능” ≠ 렌즈 안쪽 눈꺼풀 “관측”
+
+RESEARCH PROTOTYPE  •  2026.11.06
+28
+
+TESLA / VEHICLE-INTEGRATED
+실내 카메라 + 보조 신호
+• 운전자 주의 집중 모니터링
+• 일부 기능에 적외선 조명
+• 조향 토크 등 차량 신호와 연계
+
+OUR PROTOTYPE / RGB WEBCAM
+일반 RGB 카메라 + 모델
+• MediaPipe ROI
+• 눈 YOLO26n / 하품 ResNet18
+• 차량 센서·적외선 조명 없음
+테슬라 공식 문서: Cabin Camera / Advanced Driver Distraction Warning / FSD 주의 집중 안내
+
+SLIDE 29
+
+
+AURA DRIVE
+PRODUCT LIMITATIONS
+선글라스·마스크는 “센서 한계”로 인정
+빛이 투과하지 않아 기록되지 않은 눈꺼풀은 색상 보정으로 복원할 수 없습니다.
+
+RESEARCH PROTOTYPE  •  2026.11.06
+29
+
+
+짙은 선글라스
+눈 상태 관측 불가 → UNKNOWN
+
+
+마스크·손 가림
+하품 인식 불가/오탐 → UNKNOWN
+
+
+고개 숙임
+ROI 추출 실패 → 반응 확인
+선글라스가 감지된다고 해서 눈 감김까지 검증됐다는 뜻이 아님
+
+SLIDE 30
+
+
+AURA DRIVE
+ROADMAP
+다음 단계는 모델 추가보다 검증 강화
+발작·실신 판정 모델 추가는 데이터·의료적 검증 범위가 커 이번 버전에서 제외
+
+RESEARCH PROTOTYPE  •  2026.11.06
+30
+
+01
+미사용 인물·조명 데이터 평가
+새로운 홀드아웃 세트 구성
+
+02
+경고 이벤트 단위 검증
+오탐/미탐 · 반응 시간 측정
+
+03
+관측 불가 처리
+선글라스·마스크·고개 숙임
+
+04
+차량 연동 검토
+안전 인증·제어 인터페이스 필요
+
+SLIDE 31
+
+
+AURA DRIVE
+TECHNICAL APPENDIX
+실험 설정·Best Epoch 기록
+설정 Epoch와 실제 Best/Stop Epoch를 분리해서 기록
+
+RESEARCH PROTOTYPE  •  2026.11.06
+31
+
+모델
+설정
+Best/Val
+Stop
+비고
+
+눈 YOLO26n
+25
+6
+13
+224 / Batch16
+
+눈 ResNet18
+25
+Val 100% E3
+10
+LR 1e-4 / CPU
+
+눈 MobileNetV3
+25
+Val 100% E2
+9
+LR 1e-4 / CPU
+
+하품 ResNet18
+25
+10
+17
+Warmup 2 / Pat.7
+
+하품 MobileNetV3
+25
+6
+13
+Team model
+
+하품 EfficientNet-B0
+25
+12
+19
+Team model
+하품 세 모델의 최적 체크포인트는 팀원 PDF 보고서의 Validation Loss 최소 시점을 따릅니다.
+
+SLIDE 32
+
+
+AURA DRIVE
+MEASUREMENTS APPENDIX
+전체 실험 결과 한눈에 보기
+평가 데이터 특성과 개발용/외부용의 구분이 중요
+
+RESEARCH PROTOTYPE  •  2026.11.06
+32
+
+구분
+모델 / 설정
+결과
+
+눈 내부 Test
+YOLO26n · ResNet18 · MobileNet
+100.00%
+
+눈 CEW
+YOLO26n Baseline
+79.12%
+
+눈 CEW
+YOLO26n CLAHE+0.25
+88.36%
+
+눈 Simuletic
+YOLO26n CLAHE+0.25
+97.90%
+
+눈 MRL
+YOLO26n / ResNet18 / MobileNet
+98.80 / 99.95 / 99.70%
+
+하품 내부 Test
+Team ResNet18 · ROI 성공
+99.06%
+
+하품 Roboflow
+ResNet18 RGB 0.50
+65.65%
+
+하품 Roboflow
+ResNet18 RGB 0.10
+71.50%
+
+SLIDE 33
+
+
+AURA DRIVE
+SOURCES & ETHICS
+근거와 한계를 구분한 발표 자료
+기술적 참고는 공식 문서와 실제 코드·실험 로그에 기초
+
+RESEARCH PROTOTYPE  •  2026.11.06
+33
+
+내부 코드
+01~21 실험 스크립트 / 로컬 reports CSV / v9 Streamlit
+
+팀원 모델
+yawn_model.pdf / Kyoeun33/yawm1
+
+Tesla 실내 카메라
+tesla.com/support/vehicle-safety-security-features
+
+Tesla 선글라스
+tesla.com/ownersmanual/models/ko_kr/GUID-2CB60804-9CEA-4F4B-8B04-09B991368DC5.html
+
+Tesla IR·한계
+tesla.com/ownersmanual/model3/en_si/GUID-BB4CE0C1-D4D7-4B31-B780-85C3EFCFFF12.html
+
+Tesla 실내 레이더
+tesla.com/ownersmanual/model3/ko_kr/GUID-4ED40B33-6E34-4E58-B8C3-9D0810DB87D6.html
+
+실제 차량 제어·실제 119 신고·실신 진단 없음 / 시험 결과는 연구·시연 범위

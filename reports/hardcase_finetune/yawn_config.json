@@ -1,0 +1,23 @@
+{
+  "task": "yawn",
+  "seed": 42,
+  "method": "frozen_backbone_final_linear_layer_finetune",
+  "epochs": 40,
+  "best_epoch": 36,
+  "lr": 0.0001,
+  "weight_decay": 0.01,
+  "internal_loss_weight": 0.8,
+  "added_loss_weight": 0.2,
+  "baseline_validation_loss": 0.10892485082149506,
+  "best_validation_loss": 0.09677544981241226,
+  "thresholds": [
+    0.1,
+    0.15
+  ],
+  "trainable_parameters": 1026,
+  "weights": "C:\\Users\\lookm\\Documents\\GitHub\\VisionProject\\runs\\hardcase_finetune\\yawn_head_finetuned.pt",
+  "sha256": "348b9b17fd82cd575af2d5c9f5d2503b217619f5cf8b3284878878f98b30cc42",
+  "selection": "minimum validation loss; external/test never used for epoch selection",
+  "input": "MediaPipe mouth ROI then RGB",
+  "limitation": "new labels visually reviewed by assistant; new data has no confirmed positive examples; source identity independence incomplete"
+}

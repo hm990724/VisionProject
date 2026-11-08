@@ -54,14 +54,6 @@ def paragraph(draw, xy, text, use_font, fill=TEXT, max_width=700, line_gap=10):
     return y
 
 
-def fitted_font(draw, text, max_width, initial_size, minimum_size, bold=False):
-    for size in range(initial_size, minimum_size - 1, -1):
-        candidate = font(size, bold)
-        if draw.textbbox((0, 0), text, font=candidate)[2] <= max_width:
-            return candidate
-    return font(minimum_size, bold)
-
-
 def rounded(draw, box, fill=PANEL, outline=None, radius=20, width=1):
     draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
 
@@ -79,45 +71,34 @@ def base(title: str, kicker: str, page: int):
 
 def card(draw, box, title, body=None, accent=MINT, body_size=23):
     rounded(draw, box, PANEL, "#294257", 18, 2)
-    x1, y1, x2, y2 = box
+    x1, y1, x2, _ = box
     draw.rounded_rectangle((x1, y1, x1 + 8, y1 + 62), radius=4, fill=accent)
-    title_font = fitted_font(draw, title, x2 - x1 - 56, 24, 17, True)
-    draw.text((x1 + 28, y1 + 19), title, font=title_font, fill=TEXT)
+    draw.text((x1 + 28, y1 + 19), title, font=font(24, True), fill=TEXT)
     if body:
-        available_height = y2 - y1 - 88
-        available_width = x2 - x1 - 56
-        for size in range(body_size, 14, -1):
-            body_font = font(size)
-            lines = wrap_lines(draw, body, body_font, available_width)
-            if len(lines) * (size + 8) <= available_height:
-                break
-        paragraph(draw, (x1 + 28, y1 + 68), body, body_font, MUTED, available_width, 8)
+        paragraph(draw, (x1 + 28, y1 + 68), body, font(body_size), MUTED, x2 - x1 - 56, 9)
 
 
 def metric(draw, box, value, label, detail="", color=MINT):
     rounded(draw, box, PANEL_2, "#35536A", 18, 2)
     x1, y1, x2, _ = box
-    label_font = fitted_font(draw, label, x2 - x1 - 44, 20, 15, True)
-    value_font = fitted_font(draw, value, x2 - x1 - 44, 43, 26, True)
-    draw.text((x1 + 22, y1 + 17), label, font=label_font, fill=MUTED)
-    draw.text((x1 + 22, y1 + 55), value, font=value_font, fill=color)
+    draw.text((x1 + 22, y1 + 17), label, font=font(20, True), fill=MUTED)
+    draw.text((x1 + 22, y1 + 55), value, font=font(43, True), fill=color)
     if detail:
         paragraph(draw, (x1 + 22, y1 + 112), detail, font(17), MUTED, x2 - x1 - 44, 6)
 
 
-def fit_image(image: Image.Image, box, radius=16, background="#0B1723", nearest=False):
+def fit_image(image: Image.Image, box, radius=16, background="#0B1723"):
     x1, y1, x2, y2 = box
     target_w, target_h = x2 - x1, y2 - y1
-    method = Image.Resampling.NEAREST if nearest else Image.Resampling.LANCZOS
-    fitted = ImageOps.fit(image.convert("RGB"), (target_w, target_h), method=method)
+    fitted = ImageOps.fit(image.convert("RGB"), (target_w, target_h), method=Image.Resampling.LANCZOS)
     mask = Image.new("L", fitted.size, 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, target_w - 1, target_h - 1), radius=radius, fill=255)
     return fitted, mask
 
 
-def paste_image(canvas, path_or_image, box, radius=16, nearest=False):
+def paste_image(canvas, path_or_image, box, radius=16):
     source = path_or_image if isinstance(path_or_image, Image.Image) else Image.open(path_or_image)
-    fitted, mask = fit_image(source, box, radius, nearest=nearest)
+    fitted, mask = fit_image(source, box, radius)
     canvas.paste(fitted, (box[0], box[1]), mask)
 
 
@@ -209,18 +190,18 @@ def slide_external_sets():
 
 def slide_eye_errors():
     image, d = base("눈 오류 사례: 사진은 원인을 확정하지 않지만, 질문을 만듭니다", "05 / Eye error audit", 6)
-    eye_makeup = Image.open(ROOT / "reports/cew/roi/eyes/cew/Open/01228_0.png")
-    eye_low_quality = Image.open(ROOT / "reports/cew/roi/eyes/cew/Open/01244_0.png")
+    eye_makeup = crop("reports/cew/error_audit/both_fail_Open.png", (320, 14 * 220, 590, 15 * 220))
+    eye_low_quality = crop("reports/cew/error_audit/both_fail_Open.png", (320, 9 * 220, 590, 10 * 220))
     paste_image(image, eye_makeup, (84, 190, 510, 440))
     paste_image(image, eye_low_quality, (540, 190, 966, 440))
     d = ImageDraw.Draw(image)
-    d.text((98, 458), "열린 눈 → 감김 오분류 · 사례 A", font=font(18, True), fill=MINT)
-    d.text((553, 458), "열린 눈 → 감김 오분류 · 사례 B", font=font(18, True), fill=AMBER)
+    d.text((98, 458), "열린 눈 → 감김 오분류 예시 ROI", font=font(18, True), fill=MINT)
+    d.text((553, 458), "저해상도·경계가 불분명한 ROI 예시", font=font(18, True), fill=AMBER)
     metric(d, (1010, 190, 1516, 335), "432장", "Open → Closed", "YOLO26n · CEW", CORAL)
     metric(d, (1010, 355, 1516, 500), "40장", "Closed → Open", "YOLO26n · CEW", AMBER)
-    card(d, (84, 525, 1516, 710), "다음에 확인할 단서 — 아직 원인으로 확정한 것은 아님", "저해상도·시선 각도·눈꺼풀 경계와 함께 눈썹, 속눈썹, 화장처럼 눈 주변을 강조하는 요소도 점검 대상입니다. 사례 사진만으로 모델의 인과적 주의 영역을 증명할 수 없습니다. ROI 실패 34장은 분류 오류와 별도로 집계했습니다.", BLUE, 21)
+    card(d, (84, 525, 1516, 710), "육안 관찰에서 세운 가설", "낮은 화질, 고개 방향, 눈썹·속눈썹·화장으로 강조된 눈 경계가 분류를 어렵게 했을 가능성. 사진만으로 모델의 인과적 주의 영역을 증명한 것은 아닙니다. ROI 실패 34장은 분류 오류와 별도로 기록했습니다.", BLUE, 21)
     d.text((89, 755), "그래서 다음 단계는 ‘새 모델 추가’가 아니라 CLAHE 및 threshold sweep으로 trade-off를 측정하는 것이었습니다.", font=font(19, True), fill=TEXT)
-    source(d, "근거: reports/cew/roi/eyes/cew/Open/01228_0.png, 01244_0.png · error_audit/model_error_breakdown.csv · external_summary.csv")
+    source(d, "근거: reports/cew/error_audit/both_fail_Open.png · model_error_breakdown.csv · external_summary.csv")
     return image
 
 
@@ -361,116 +342,8 @@ def slide_safety():
     return image
 
 
-def slide_lessons():
-    image, d = base("점수보다 더 크게 배운 네 가지", "12 / Lessons learned", 13)
-    card(
-        d, (84, 190, 780, 430), "내부 100% ≠ 새 운전자에게도 100%",
-        "눈 내부 Test는 100%였지만 CEW 전체 평가에서는 79.12%였습니다. 인물 ID 기반 분할이 없어 과적합을 확정할 수는 없고, 일반화도 보증하지 않습니다.",
-        MINT, 21,
-    )
-    card(
-        d, (820, 190, 1516, 430), "속눈썹·화장·ROI 경계는 실패 단서 후보",
-        "오류 이미지에서 속눈썹·눈썹·화장, 얼굴 각도와 낮은 화질이 함께 관찰됐습니다. 사진 사례만으로 원인을 단정하지 않았고, ROI 미검출 34/2,423장은 분류 오류와 따로 셌습니다.",
-        BLUE, 21,
-    )
-    card(
-        d, (84, 465, 780, 700), "임계값은 요구 조건에 따라 달라짐",
-        "CLAHE + 0.25: Closed Recall 90.69%, Open FPR 13.48%. 0.40은 정확도 90.18%로 더 높지만 Closed Recall은 86.66%입니다. 한 숫자만으로 후보를 고르지 않았습니다.",
-        AMBER, 20,
-    )
-    card(
-        d, (820, 465, 1516, 700), "웹캠 A/B는 정확도 평가가 아니었음",
-        "수동 눈 감김 기록과 영상 시점이 충분히 정밀하지 않아 경고 횟수만 비교했습니다. 다음 검증에는 동기화된 정답 라벨, 새 인물, 독립 holdout이 필요합니다.",
-        CORAL, 20,
-    )
-    d.text((90, 748), "진행 흐름: 내부 점수 확인 → 외부 데이터에서 차이 발견 → 오류·ROI·threshold 분석 → 제한을 밝힌 시연 후보로 정리", font=font(18, True), fill=TEXT)
-    source(d, "근거: reports/model_comparison.csv · reports/cew/external_summary.csv · reports/cew/threshold_analysis/threshold_sweep.csv · reports/webcam_eye_ab/*.csv")
-    return image
-
-
-def slide_vehicle_context():
-    image, d = base("선글라스 대응은 모델 하나보다 ‘차량 시스템’의 문제", "13 / Product context · sunglasses", 14)
-    card(
-        d, (84, 190, 780, 430), "상용차 기능과 이 프로젝트는 조건이 다름",
-        "Tesla 등 일부 양산차의 운전자 모니터링은 차내 카메라, 해당 차량의 소프트웨어와 경고 UX가 통합된 제품 기능입니다. 카메라 위치·광학/조명·차종별 사양과 검증 범위가 다를 수 있어, 이를 일반 웹캠 모델의 선글라스 성능 근거로 볼 수 없습니다.",
-        BLUE, 20,
-    )
-    card(
-        d, (820, 190, 1516, 430), "우리 데모에서 확인한 범위",
-        "일반 웹캠 입력과 눈 ROI 분류를 사용했습니다. 선글라스·야간·역광에 대한 별도 데이터 평가, 적외선 카메라 또는 차량 신호 연동은 하지 않았습니다. 가려져 눈을 확인할 수 없으면 ‘정상’으로 추정하지 않고 판단 불가(UNKNOWN)로 처리하는 것이 다음 설계 과제입니다.",
-        AMBER, 20,
-    )
-    steps = [
-        ("입력 품질", "초점 · 노출\n가림 · 조명", BLUE),
-        ("눈 관측", "가시성 확인\n불확실성 판정", MINT),
-        ("시간 신호", "연속 관측\n깜박임·지속", AMBER),
-        ("안전 UX", "불확실성 표시\n주의 환기", CORAL),
-    ]
-    x = 120
-    for i, (title, body, accent) in enumerate(steps):
-        rounded(d, (x, 500, x + 300, 655), PANEL, "#35536A", 18, 2)
-        d.rounded_rectangle((x, 500, x + 300, 511), radius=5, fill=accent)
-        d.text((x + 24, 530), title, font=font(23, True), fill=TEXT)
-        paragraph(d, (x + 24, 575), body, font(19), MUTED, 252, 5)
-        if i < len(steps) - 1:
-            d.line((x + 302, 575, x + 340, 575), fill=MINT, width=3)
-        x += 365
-    d.text((90, 710), "발표 답변: “상용차의 선글라스 대응을 그대로 가져올 수는 없습니다. 저희는 해당 조건을 검증하지 않았고, 하드웨어·데이터·운영 로직까지 함께 검증해야 합니다.”", font=font(19, True), fill=TEXT)
-    source(d, "참고: Tesla Owner’s Manual, Driver Attentiveness / Cabin Camera (차량별 사양·기능 차이 유의) · 본 프로젝트는 차량 연동 없음")
-    return image
-
-
-def slide_image_quality():
-    image, d = base("흐린 입력을 크게 보여도, 사라진 픽셀은 돌아오지 않습니다", "14 / Image quality · what we tested", 15)
-    raw = Image.open(ROOT / "reports/cew/roi_ablation/roi_examples/Closed/baseline/00000_0.png").crop((0, 48, 224, 176))
-    clahe = Image.open(ROOT / "reports/cew/roi_ablation/roi_examples/Closed/clahe/00000_0.png").crop((0, 48, 224, 176))
-    paste_image(image, raw, (84, 220, 520, 465), nearest=True)
-    paste_image(image, clahe, (555, 220, 991, 465), nearest=True)
-    d.text((100, 482), "기본 ROI · 모델 입력 224×224", font=font(19, True), fill=BLUE)
-    d.text((572, 482), "같은 ROI · CLAHE 적용 후", font=font(19, True), fill=MINT)
-    card(
-        d, (1030, 190, 1516, 510), "실제로 시험한 것: CLAHE",
-        "ROI의 국소 대비를 높이는 전처리입니다. 눈을 더 선명하게 복원하거나 해상도를 높이는 처리는 아닙니다. CEW에서 CLAHE + threshold 0.25는 accuracy 88.36%, Closed Recall 90.69%, Open FPR 13.48%였습니다. 효과는 이 데이터와 설정에 한정됩니다.",
-        MINT, 19,
-    )
-    card(
-        d, (84, 555, 780, 735), "왜 사례 이미지가 깨져 보이나",
-        "CEW 예시 원본 얼굴은 100×100 픽셀입니다. 눈 ROI를 224×224로 맞춰 모델에 넣지만, 확대가 새 세부정보를 만들지는 않습니다. 슬라이드의 확대 이미지는 픽셀 구조를 그대로 보여주며, 선명도 복원 결과가 아닙니다.",
-        AMBER, 19,
-    )
-    card(
-        d, (820, 555, 1516, 735), "아직 하지 않은 실험",
-        "Sharpening·초해상도는 별도로 비교하지 않았습니다. 과도한 보정은 노이즈나 속눈썹 경계를 강조할 수 있어, 적용 전 원본 고해상도 입력과 함께 별도 검증해야 합니다. 다음 우선순위는 선명한 카메라/입력과 다양한 조명·안경 조건의 평가입니다.",
-        CORAL, 19,
-    )
-    source(d, "근거: reports/cew/roi_ablation/roi_examples/ · reports/cew/threshold_analysis/threshold_sweep.csv · CEW Open 원본 예시 100×100")
-    return image
-
-
-def slide_seizure_scope():
-    image, d = base("발작 감지는 시도했지만, 이번 데이터와 검증으로는 책임 있게 말할 수 없었습니다", "15 / Medical scope · seizure", 16)
-    card(
-        d, (84, 190, 780, 470), "행동 인식 모델만 붙이면 해결되는 문제가 아님",
-        "발작 양상은 사람과 상황에 따라 다양하고, 일부 움직임은 일상 행동·수면·다른 상태와 겹칠 수 있습니다. 짧은 영상에서 보이는 동작만으로 의료적 원인을 구별하기 어렵고, 모델의 오탐·미탐도 실제 사람에게 영향을 줄 수 있습니다.",
-        CORAL, 21,
-    )
-    card(
-        d, (820, 190, 1516, 470), "이번 프로젝트에서 제외한 이유",
-        "검증된 임상 영상과 의료 전문가가 확인한 라벨이 없고, 여러 사람·발작 유형을 포함하는 독립 평가도 준비되지 않았습니다. 따라서 발작 탐지 모델을 만들거나 성능을 주장하지 않았습니다. 프로젝트 범위는 눈 감김·하품 징후와 안전 대응 시뮬레이션으로 제한했습니다.",
-        AMBER, 21,
-    )
-    card(
-        d, (84, 505, 1516, 710), "향후 연구가 가능하려면",
-        "의료진·윤리 검토와 적절한 동의·개인정보 보호, 다양한 임상 사례 및 비발작 대조군, 사람 단위 독립 평가, 임상 전문가의 오류 검토가 선행돼야 합니다. 행동/시계열 모델은 연구 도구일 뿐 진단을 대신하지 않으며, 불확실할 때는 판단 보류가 필요합니다.",
-        BLUE, 21,
-    )
-    d.text((90, 750), "발표 답변: “발작 징후는 개인차와 임상적 해석이 필요해, 이번 데이터로는 검증할 수 없었습니다. 안전과 타당성을 위해 범위에서 제외했습니다.”", font=font(18, True), fill=TEXT)
-    source(d, "범위 선언: 본 프로토타입은 의료기기·진단 시스템이 아니며 발작 감지 기능을 제공하지 않습니다.")
-    return image
-
-
 def slide_close():
-    image, d = base("최종 후보는 ‘완성 답’이 아니라, 근거가 있는 다음 실험입니다", "16 / Takeaways & limits", 17)
+    image, d = base("최종 후보는 ‘완성 답’이 아니라, 근거가 있는 다음 실험입니다", "12 / Takeaways & limits", 13)
     card(d, (84, 190, 780, 390), "눈 감김 후보", "MediaPipe Eye ROI → CLAHE → YOLO26n-cls → P(Closed) ≥ 0.25\nCEW: accuracy 88.36% · Closed Recall 90.69% · Open FPR 13.48%\n선택 이유: Closed Recall 90% 조건을 만족하며 baseline 대비 오탐을 줄임. 개발셋 선택 결과.", MINT, 21)
     card(d, (820, 190, 1516, 390), "하품 후보", "MediaPipe Mouth ROI → RGB → ResNet18 → P(yawn) .10 / .15\nRoboflow에서 .10: recall 66.67%, FP 28\n.15: recall 64.33%, FP 24\n외부 전체 정확도 65.65%라 추가 검증 필요.", AMBER, 21)
     card(d, (84, 430, 780, 690), "발표에서 분명히 말할 한계", "인물 독립 holdout 부재 · 외부셋으로 설정 선택 · MRL 중복 가능성 · 하품 외부 Recall 낮음 · 가림/선글라스/ROI 실패는 UNKNOWN 필요 · 웹캠 A/B는 프레임 정확도 아님", CORAL, 20)
@@ -480,7 +353,7 @@ def slide_close():
     return image
 
 
-def make_preview(images, path):
+def make_preview(images):
     thumb_w, thumb_h = 400, 225
     cols = 3
     rows = (len(images) + cols - 1) // cols
@@ -488,7 +361,7 @@ def make_preview(images, path):
     for index, image in enumerate(images):
         thumb = image.resize((thumb_w, thumb_h), Image.Resampling.LANCZOS)
         montage.paste(thumb, ((index % cols) * thumb_w, (index // cols) * thumb_h))
-    montage.save(path, quality=88, optimize=True)
+    montage.save(OUT / "AURA_DRIVE_slide_overview.jpg", quality=88, optimize=True)
 
 
 def build():
@@ -497,8 +370,7 @@ def build():
         slide_cover(), slide_internal_external(), slide_data(), slide_epochs(),
         slide_external_sets(), slide_eye_errors(), slide_eye_threshold(),
         slide_yawn_external(), slide_yawn_cases(), slide_yawn_threshold(),
-        slide_realtime(), slide_safety(), slide_lessons(), slide_vehicle_context(),
-        slide_image_quality(), slide_seizure_scope(), slide_close(),
+        slide_realtime(), slide_safety(), slide_close(),
     ]
     deck = Presentation()
     deck.slide_width = Inches(13.333333)
@@ -506,22 +378,15 @@ def build():
     for image in images:
         slide = deck.slides.add_slide(deck.slide_layouts[6])
         buffer = BytesIO()
-        image.save(buffer, format="PNG", optimize=True)
+        image.save(buffer, format="JPEG", quality=91, optimize=True)
         buffer.seek(0)
         slide.shapes.add_picture(buffer, 0, 0, width=deck.slide_width, height=deck.slide_height)
     pptx_path = OUT / "AURA_DRIVE_발표자료_완성본.pptx"
     pdf_path = OUT / "AURA_DRIVE_발표자료_완성본.pdf"
-    preview_path = OUT / "AURA_DRIVE_slide_overview.jpg"
-    pptx_tmp = pptx_path.with_name(pptx_path.stem + ".tmp" + pptx_path.suffix)
-    pdf_tmp = pdf_path.with_name(pdf_path.stem + ".tmp" + pdf_path.suffix)
-    preview_tmp = preview_path.with_name(preview_path.stem + ".tmp" + preview_path.suffix)
-    deck.save(pptx_tmp)
+    deck.save(pptx_path)
     pdf_images = [image.convert("RGB") for image in images]
-    pdf_images[0].save(pdf_tmp, "PDF", save_all=True, append_images=pdf_images[1:], resolution=220.0, quality=95)
-    make_preview(images, preview_tmp)
-    pptx_tmp.replace(pptx_path)
-    pdf_tmp.replace(pdf_path)
-    preview_tmp.replace(preview_path)
+    pdf_images[0].save(pdf_path, "PDF", save_all=True, append_images=pdf_images[1:], resolution=150.0)
+    make_preview(images)
     print(f"Created {len(images)} slides")
     print(pptx_path)
     print(pdf_path)

@@ -1,0 +1,74 @@
+{
+  "video": "C:\\Users\\lookm\\Documents\\GitHub\\VisionProject\\data\\yawn_mp\\Yawning\\Female\\HDTV720\\P1042778_720.mp4",
+  "sample_count": 149,
+  "roi_success_count": 144,
+  "params": {
+    "every": 0.4,
+    "threshold": 0.15,
+    "min_duration": 1.5,
+    "smooth_window": 3
+  },
+  "candidate_events_by_threshold": {
+    "0.10": [
+      {
+        "start_s": 30.4,
+        "end_s": 34.4,
+        "duration_s": 4.0,
+        "positive_samples": 10
+      },
+      {
+        "start_s": 41.6,
+        "end_s": 46.0,
+        "duration_s": 4.4,
+        "positive_samples": 11
+      },
+      {
+        "start_s": 50.4,
+        "end_s": 54.4,
+        "duration_s": 4.0,
+        "positive_samples": 10
+      }
+    ],
+    "0.15": [
+      {
+        "start_s": 30.4,
+        "end_s": 34.4,
+        "duration_s": 4.0,
+        "positive_samples": 10
+      },
+      {
+        "start_s": 41.6,
+        "end_s": 46.0,
+        "duration_s": 4.4,
+        "positive_samples": 11
+      },
+      {
+        "start_s": 50.4,
+        "end_s": 54.4,
+        "duration_s": 4.0,
+        "positive_samples": 10
+      }
+    ],
+    "0.50": [
+      {
+        "start_s": 30.4,
+        "end_s": 34.4,
+        "duration_s": 4.0,
+        "positive_samples": 10
+      },
+      {
+        "start_s": 41.6,
+        "end_s": 46.0,
+        "duration_s": 4.4,
+        "positive_samples": 11
+      },
+      {
+        "start_s": 50.8,
+        "end_s": 54.0,
+        "duration_s": 3.2,
+        "positive_samples": 8
+      }
+    ]
+  },
+  "warning": "Unlabeled single-video case study; no accuracy claim."
+}

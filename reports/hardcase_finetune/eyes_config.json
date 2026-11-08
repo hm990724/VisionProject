@@ -1,0 +1,22 @@
+{
+  "task": "eyes",
+  "seed": 42,
+  "method": "frozen_backbone_final_linear_layer_finetune",
+  "epochs": 40,
+  "best_epoch": 40,
+  "lr": 0.0001,
+  "weight_decay": 0.01,
+  "internal_loss_weight": 0.8,
+  "added_loss_weight": 0.2,
+  "baseline_validation_loss": 0.004395911004394293,
+  "best_validation_loss": 0.0037550712004303932,
+  "thresholds": [
+    0.25
+  ],
+  "trainable_parameters": 2562,
+  "weights": "C:\\Users\\lookm\\Documents\\GitHub\\VisionProject\\runs\\hardcase_finetune\\eyes_head_finetuned.pt",
+  "sha256": "b0b703b1ec9c828e1f63d7ce6dfdacb4c290566102fe6281052cc26012a5ff2e",
+  "selection": "minimum validation loss; external/test never used for epoch selection",
+  "input": "MediaPipe eye ROI then CLAHE",
+  "limitation": "new labels visually reviewed by assistant; new data has no confirmed positive examples; source identity independence incomplete"
+}

@@ -1,0 +1,28 @@
+{
+  "total": 511,
+  "conditions": {
+    "no_makeup": 26,
+    "with_makeup": 26,
+    "wrinkles": 459
+  },
+  "labels": {
+    "Open": 51,
+    "UNKNOWN": 306,
+    "no_yawn": 154
+  },
+  "overlap_images": 1,
+  "usable": {
+    "eyes_test": 12,
+    "eyes_train": 29,
+    "eyes_val": 10,
+    "yawn_test": 25,
+    "yawn_train": 81,
+    "yawn_val": 26
+  },
+  "roi_success": {
+    "no_makeup": 26,
+    "with_makeup": 26,
+    "wrinkles": 144
+  },
+  "note": "Assistant visual annotations; not independently human verified. Uncertain/skin-only samples excluded. New additions contain no confirmed positive examples. Person independence beyond known pairs is not guaranteed."
+}

@@ -1,0 +1,20 @@
+{
+  "group_disjoint": true,
+  "baseline_and_saved_models_checked": true,
+  "checks": [
+    {
+      "task": "eyes",
+      "baseline_correct": 2141,
+      "historical_probability_max_error": 4.482051849330482e-06,
+      "saved_model_probability_max_error": 2.9802322387695312e-08,
+      "control_best_epoch": 40
+    },
+    {
+      "task": "yawn",
+      "baseline_correct": 281,
+      "historical_probability_max_error": 4.999303817865286e-07,
+      "saved_model_probability_max_error": 0.0,
+      "control_best_epoch": 13
+    }
+  ]
+}
