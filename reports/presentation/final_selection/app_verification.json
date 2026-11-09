@@ -1,0 +1,34 @@
+{
+  "navigation": "pass",
+  "camera_activated": false,
+  "yawn_model": "yolo26s",
+  "yawn_input": "full_image",
+  "threshold": 0.5,
+  "engine_vs_saved_31": [
+    {
+      "image": "C:\\Users\\lookm\\Documents\\GitHub\\VisionProject\\data\\external_driver\\yawn\\normal\\yawn\\BDL-230034-20251008-202329_Fatigue_JPEG.rf.64df884a272ce4d821118cf176b88712.jpg",
+      "expected": 0.4928382,
+      "actual": 0.4928382337093353,
+      "difference": 3.37093353230955e-08
+    },
+    {
+      "image": "C:\\Users\\lookm\\Documents\\GitHub\\VisionProject\\data\\external_driver\\yawn\\normal\\yawn\\BDL-230031-20251016-210323_Fatigue_JPEG.rf.37997d345c75fbdd456f6f394ced218b.jpg",
+      "expected": 0.5374258,
+      "actual": 0.5374257564544678,
+      "difference": 4.354553218011148e-08
+    },
+    {
+      "image": "C:\\Users\\lookm\\Documents\\GitHub\\VisionProject\\data\\external_driver\\yawn\\normal\\no_yawn\\BDL-230031-20251016-044822_Fatigue_JPEG.rf.668203670e7bc54859d4e73255e5692f.jpg",
+      "expected": 0.1694725,
+      "actual": 0.16947247087955475,
+      "difference": 2.912044524960855e-08
+    },
+    {
+      "image": "C:\\Users\\lookm\\Documents\\GitHub\\VisionProject\\data\\external_driver\\yawn\\normal\\no_yawn\\BDL-439_2025-10-17-051944_JPEG.rf.2371d523e317b9c446b0460ba2409559.jpg",
+      "expected": 0.5015569,
+      "actual": 0.501556932926178,
+      "difference": 3.2926178006320583e-08
+    }
+  ],
+  "camera_performance": "not measured for current dashboard version"
+}

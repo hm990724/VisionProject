@@ -1,0 +1,4 @@
+﻿모델,선택 이유,입력과 출력
+YOLO26n-cls,경량 분류 · CPU 데모 후보,224×224 → Open / Closed
+ResNet18,잔차 CNN · 비교 기준,동일 클래스·분할
+MobileNetV3-Small,작은 모델 · 연산량 비교,동일 클래스·분할

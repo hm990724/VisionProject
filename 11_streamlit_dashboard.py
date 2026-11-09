@@ -1,11 +1,19 @@
-"""AURA DRIVE v9: low-latency AI monitor + simulated safety response."""
+"""AURA DRIVE v11 — cinematic local-only AI driver monitoring demo.
+
+- Local OpenCV camera + localhost MJPEG stream (preview never waits for AI).
+- Existing weights are NEVER retrained or modified.
+- Eye: MediaPipe eye crops -> LAB CLAHE -> YOLO26n-cls.
+- Yawn: original full RGB frame -> YOLO26s-cls, SAME input as experiment 31.
+- Vehicle control / 119: simulation only, NOT connected to real hardware.
+
+Run on the same Windows PC as the webcam:
+    streamlit run 11_streamlit_dashboard.py --server.address 127.0.0.1
+"""
 from __future__ import annotations
 
 import base64
-import importlib.util
+import importlib
 import io
-import json
-import sys
 import threading
 import time
 from collections import deque
@@ -16,917 +24,629 @@ import cv2
 import numpy as np
 import streamlit as st
 import torch
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
+
 from common import to_square
-from roi_utils import crop_eyes, LEFT_EYE, RIGHT_EYE
+from roi_utils import LEFT_EYE, RIGHT_EYE, crop_eyes
+from aura_local_camera import LatestFrameWorker, LocalCameraStream
 from aura_safety_sim import SafetySimulation
+from aura_event_logic import ContinuousAlerts
+from aura_audio_panel import render_audio_panel
 
 ROOT = Path(__file__).resolve().parent
-TEAM = ROOT / "teammate_yawn"
-if not TEAM.exists():
-    TEAM = ROOT / "yawm1"
+EYE_FILE = ROOT / "runs/eyes_yolo26n-cls/weights/best.pt"
+YAWN_FILE = ROOT / "runs/yawn_yolo26s-cls/weights/best.pt"
+CAR_FILE = ROOT / "aura_vehicle_hero.jpg"
 
-st.set_page_config(page_title="AURA DRIVE | AI 운전자 모니터", page_icon="🚘", layout="wide", initial_sidebar_state="collapsed")
-st.html("""<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap');
-html,body,[data-testid="stApp"]{font-family:Inter,'Noto Sans KR',sans-serif;background:#090f19;color:#eaf4fa}
-[data-testid="stAppViewContainer"]{background:radial-gradient(ellipse at 14% 0,#18405277,transparent 44%),#090f19}
-[data-testid="stMainBlockContainer"]{max-width:1320px;padding:1.3rem 2.2rem 4rem}
-[data-testid="stHeader"]{background:transparent}#MainMenu,footer{visibility:hidden}
-h1,h2,h3{color:#f0f9ff;letter-spacing:-.04em}
-.brand{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;padding:5px 0 19px;border-bottom:1px solid #26384b}
-.brand b{font-size:20px;letter-spacing:.17em}.brand b span{color:#88f9db}.brand small{font-size:11px;color:#89a8b9;letter-spacing:.12em}
-.eyebrow{color:#7ff0d0;font-size:11px;font-weight:800;letter-spacing:.2em}.headline{font-size:clamp(24px,3.2vw,40px);font-weight:800;line-height:1.3;margin:10px 0 8px}
-.subtitle{font-size:13px;color:#adc2d3;margin-bottom:18px}
-.scene{height:270px;position:relative;overflow:hidden;border-radius:24px;border:1px solid #39566c;background:linear-gradient(#102e43,#15546b 52%,#06111e 53%);box-shadow:0 20px 70px #0006;margin-bottom:24px}
-.scene:before{content:"";position:absolute;width:145%;height:110%;left:-22%;top:39%;background:linear-gradient(90deg,#07111f,#1d3546 49%,#07111f);clip-path:polygon(49.5% 0,50.5% 0,100% 100%,0 100%)}
-.lane{position:absolute;top:44%;left:49.7%;height:70%;width:8px;background:repeating-linear-gradient(to bottom,#adf9e8 0px,#adf9e8 15px,transparent 15px,transparent 45px);transform:perspective(130px) rotateX(32deg);animation:road .7s linear infinite;opacity:.85}
-@keyframes road{to{background-position:0 45px}}
-.scene:after{content:"";position:absolute;bottom:-145px;right:2%;width:320px;height:320px;border:29px solid #1b2a3b;border-radius:50%;box-shadow:0 0 0 5px #65788966,inset 0 0 35px #111c2e;transform:rotate(-12deg)}
-.scene-text{position:absolute;z-index:2;top:23px;left:29px;max-width:650px}.scene-title{font-size:32px;font-weight:800;letter-spacing:-.04em;color:#effffb}
-.scene-caption{font-size:12px;color:#a5cfd5;line-height:1.7}.scene-pill{display:inline-block;padding:7px 10px;background:#112d39d9;border:1px solid #417575;border-radius:999px;font-size:10px;color:#aaf5df;margin-top:17px}
-.glass{position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,#08132199,transparent 70%),linear-gradient(0deg,#09111c77,transparent 47%)}
-.card{background:linear-gradient(140deg,#152537,#101b2b);border:1px solid #2b3e52;border-radius:18px;padding:19px 20px;min-height:110px;margin:8px 0}
-.card .label{color:#9aafc3;font-size:12px;font-weight:600}.card .num{font-size:30px;font-weight:800;margin-top:11px;letter-spacing:-.045em}.card .foot{font-size:11px;color:#83a4b5;margin-top:7px}
-.alert{padding:17px 20px;background:#13382f;border:1px solid #397c6a;border-radius:16px;margin:16px 0;display:flex;gap:13px;align-items:center}
-.alert.eye{background:#57282e;border-color:#f67d84;animation:pulse 1.1s ease-in-out infinite}.alert.yawn{background:#554027;border-color:#e6b66e}
-.alert b{font-size:17px}.alert span{font-size:12px;color:#c6d9df}.dot{width:14px;height:14px;flex-shrink:0;border-radius:50%;background:#8cf6d5;box-shadow:0 0 18px #86ffdd}.alert.eye .dot{background:#ff8489;box-shadow:0 0 23px #ff6565}.alert.yawn .dot{background:#fccc77}
-@keyframes pulse{50%{box-shadow:0 0 29px #ff666944}}
-.section{font-size:19px;font-weight:800;margin:17px 0 9px}.dim{font-size:12px;color:#8faabf}
-[data-testid="stRadio"] [role="radiogroup"]{gap:9px;flex-wrap:wrap}
-[data-testid="stRadio"] [role="radiogroup"] label{border:1px solid #31485b;background:#142233;padding:8px 14px;border-radius:12px}
-[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){background:#1b4745;border-color:#5bbaa6}
-.stButton>button{border:1px solid #3b5b69;border-radius:12px;font-weight:700;min-height:42px}
-.stButton>button[kind="primary"]{background:#89f5d8;color:#082b31;border:0}
-.audio-controls{padding:14px;background:#152637;border:1px solid #375265;border-radius:16px;display:flex;gap:9px;flex-wrap:wrap;align-items:center}
-.audio-controls button{padding:10px 13px;background:#22483f;color:#eafff9;border:1px solid #5db79f;border-radius:11px;font-weight:800;cursor:pointer}
-.audio-controls button.off{background:#25384c;border-color:#536779}.audio-hint{font-size:11px;color:#bed1dd}
-[data-testid="stVideo"]{border-radius:16px;overflow:hidden}
-@media(max-width:700px){[data-testid="stMainBlockContainer"]{padding:.7rem .9rem 2.5rem}.scene{height:250px;border-radius:17px}.scene-text{left:19px;top:22px}.scene-title{font-size:23px}.scene:after{width:230px;height:230px;bottom:-135px;right:-85px}.card{padding:14px;min-height:93px}.card .num{font-size:23px}.alert b{font-size:14px}}
-@media(prefers-reduced-motion:reduce){.lane,.alert.eye{animation:none}}
-
-/* V3 cockpit -- responsive windshield and car interior */
-[data-testid="stAppViewContainer"]{background:radial-gradient(ellipse 78% 38% at 45% -8%,#143e50 0%,transparent 67%),#080e18}
-[data-testid="stMainBlockContainer"]{max-width:1480px;padding-top:1.2rem}
-[data-testid="stRadio"] [role="radiogroup"] label p{color:#dceef3!important;font-weight:750!important}
-[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{color:#a3ffe4!important}
-.cockpit{--mint:#85ffe0;position:relative;isolation:isolate;overflow:hidden;height:415px;border:1px solid #386779;border-radius:24px;background:#071622;box-shadow:inset 0 0 140px #0009,0 24px 55px #0009;margin:13px 0 17px}
-.cockpit .sky{position:absolute;inset:0 0 25%;background:radial-gradient(ellipse at 48% 70%,#e7bb9162 0%,transparent 29%),linear-gradient(180deg,#0a1a32 0%,#153c5a 51%,#39617a 86%,#a27463 100%)}
-.cockpit .sun{position:absolute;left:49%;top:31%;width:105px;height:105px;border-radius:50%;background:radial-gradient(circle,#f6cda1 0%,#ffcd994e 37%,transparent 70%);filter:blur(2px)}
-.cockpit .mountains{position:absolute;left:0;right:0;top:41%;height:28%;background:#112d40;clip-path:polygon(0 63%,7% 50%,13% 63%,20% 41%,27% 57%,38% 34%,43% 53%,51% 40%,59% 62%,71% 28%,78% 49%,84% 35%,92% 62%,100% 51%,100% 100%,0 100%)}
-.cockpit .road{position:absolute;inset:49% 0 0;background:linear-gradient(160deg,#243745 0%,#0b1620 72%);clip-path:polygon(49% 0,51% 0,100% 100%,0 100%)}
-.cockpit .shoulder{position:absolute;inset:49% 0 0;clip-path:polygon(48.7% 0,49.2% 0,4% 100%,0 100%,100% 100%,96% 100%,50.8% 0,51.3% 0,100% 100%,0 100%);background:linear-gradient(180deg,#a3d2b970,#a5f1dc5b)}
-.cockpit .roadline{position:absolute;top:51%;bottom:8%;width:5px;left:49.8%;background:repeating-linear-gradient(180deg,transparent 0 23px,#ddffee 23px 33px,transparent 33px 67px);animation:laneFlow 1.25s linear infinite;transform:perspective(110px) rotateX(20deg);filter:drop-shadow(0 0 4px #76efd7)}
-@keyframes laneFlow{to{background-position:0 67px}}
-.cockpit .car-ahead{position:absolute;left:63%;top:52%;width:34px;height:19px;background:#263644;border-radius:9px 9px 3px 3px;box-shadow:-1px 0 #1c2735,1px 0 #1c2735}
-.cockpit .car-ahead:before{content:"";position:absolute;top:3px;left:7px;width:19px;height:7px;background:#5e7481;border-radius:4px 4px 1px 1px}
-.cockpit .car-ahead:after{content:"";position:absolute;bottom:2px;left:3px;width:27px;height:3px;background:linear-gradient(90deg,#e27263 0 16%,transparent 17% 82%,#e27263 83%)}
-.cockpit .windshield{position:absolute;inset:0;border:19px solid #111b29;border-bottom-width:0;clip-path:polygon(0 0,100% 0,100% 100%,0 100%);pointer-events:none;box-shadow:inset 0 0 30px #010912}
-.cockpit .pillar-left{position:absolute;left:-16px;top:0;height:125%;width:68px;background:linear-gradient(95deg,#05090f,#192331 62%,#334050);transform:skewX(-10deg);transform-origin:top;filter:drop-shadow(15px 0 22px #050c16a5)}
-.cockpit .pillar-right{position:absolute;right:-16px;top:0;height:125%;width:75px;background:linear-gradient(85deg,#334050,#192331 35%,#05090f);transform:skewX(10deg);transform-origin:top}
-.cockpit .mirror{position:absolute;left:50%;top:-1px;width:145px;height:45px;transform:translateX(-50%);background:linear-gradient(#0a111c,#162534);border:6px solid #1e3040;border-radius:0 0 16px 16px;box-shadow:0 5px 17px #0008}
-.cockpit .mirror:after{content:"";position:absolute;inset:7px 9px;background:linear-gradient(110deg,#4a6274,#153047 40%,#516b73);border-radius:5px}
-.cockpit .cabin-glow{position:absolute;inset:0;background:linear-gradient(90deg,#06101fa3,transparent 42%,#07132266);pointer-events:none}
-.cockpit .dash{position:absolute;bottom:-90px;left:-5%;width:110%;height:215px;background:radial-gradient(ellipse at 50% 5%,#2e4a5d 0%,#101c2b 37%,#050b13 73%);border-radius:52% 52% 0 0;border-top:8px solid #273c4b;box-shadow:0 -22px 55px #07101fa6,inset 0 17px 45px #000a;transform:perspective(600px) rotateX(13deg)}
-.cockpit .dashboard-strip{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);height:57px;width:36%;max-width:400px;min-width:220px;background:linear-gradient(#102331,#09131e);border:1px solid #365269;border-radius:25px 25px 8px 8px;display:flex;gap:19px;align-items:center;justify-content:center;color:#8affdd;font:700 11px Inter,monospace;letter-spacing:.06em;box-shadow:0 -2px 16px #6fddc121}
-.cockpit .dashboard-strip strong{font-size:22px;letter-spacing:-.04em;color:#f5ffff}
-.cockpit .wheel{position:absolute;right:12%;bottom:-130px;width:265px;height:265px;border:28px solid #1a2635;border-radius:50%;background:transparent;box-shadow:0 0 0 5px #4b6472,inset 0 0 0 4px #405161,0 13px 50px #000;transform:rotate(-15deg)}
-.cockpit .wheel:before{content:"";position:absolute;left:-7px;right:-7px;top:88px;height:27px;background:linear-gradient(#293b4c,#101c2a);border-radius:11px}
-.cockpit .wheel:after{content:"✦";position:absolute;top:67px;left:69px;width:70px;height:70px;display:grid;place-items:center;background:linear-gradient(140deg,#22384a,#080f1b);border:5px solid #405d6b;border-radius:50%;color:#96f4d8;font-size:23px}
-.cockpit .hud{position:absolute;top:28px;left:36px;z-index:6;max-width:min(540px,70%)}
-.cockpit .hud-kicker{font-size:10px;letter-spacing:.24em;color:#8af7dd;font-weight:800;text-shadow:0 2px 8px #07151e}
-.cockpit .hud-title{font-size:clamp(26px,3vw,43px);line-height:1.23;font-weight:900;color:#f5fff9;letter-spacing:-.05em;margin:14px 0 12px;text-shadow:0 3px 14px #010b16}
-.cockpit .hud-title span{color:#9effe2}
-.cockpit .hud-sub{font-size:12px;line-height:1.9;color:#d1eae8;text-shadow:0 2px 6px #041320}
-.cockpit .hud-tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:19px}
-.cockpit .hud-tags span{padding:7px 11px;border-radius:8px;font-size:10px;font-weight:800;color:#adffe9;background:#061c28c9;border:1px solid #3e998a}
-.cockpit .side-status{position:absolute;z-index:6;top:28px;right:30px;min-width:154px;padding:11px 13px;background:#06141ccc;border:1px solid #497b82;border-radius:12px;box-shadow:0 10px 30px #071020}
-.cockpit .side-status .led{width:7px;height:7px;display:inline-block;background:#7ef6d0;border-radius:50%;box-shadow:0 0 10px #85ffdf;margin-right:7px}
-.cockpit .side-status b{font-size:11px;color:#dbfff6;letter-spacing:.1em}
-.cockpit .side-status small{display:block;font-size:9px;color:#a4c5cd;margin-top:7px}
-.cockpit.is-eye .side-status{border-color:#ff7878;background:#521b25ea}.cockpit.is-eye .side-status .led{background:#ff8080;box-shadow:0 0 15px #ff6969}
-.cockpit.is-yawn .side-status{border-color:#ffb875;background:#4c311fe0}.cockpit.is-yawn .side-status .led{background:#ffba6c}
-.cockpit.is-eye{box-shadow:inset 0 0 70px #e63d475c,0 20px 55px #000}
-.cockpit .corner-tag{position:absolute;z-index:5;bottom:17px;left:35px;color:#85e6d2;opacity:.85;font-size:10px;letter-spacing:.15em}
-.monitor-head{display:flex;align-items:center;justify-content:space-between;margin:14px 0;gap:8px}.monitor-head strong{font-size:16px;color:#e8fbfa}.monitor-head small{font-size:11px;color:#6cdbc1}
-.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}.metric-grid .card{min-height:100px;margin:0}
-.audio-controls{background:linear-gradient(90deg,#143039,#101d2d);border-color:#326477;margin:0 0 15px;box-shadow:inset 0 1px 0 #9cfde010}
-.audio-controls button{background:#193b38;border-color:#3a9c86}.audio-controls button:first-child{background:#9af6dc;color:#092931;border:0}
-.audio-controls button.off:first-child{background:#334456;color:#d8ebf5}
-@media(max-width:780px){
-.cockpit{height:355px;border-radius:16px}.cockpit .hud{left:20px;top:62px;max-width:87%}.cockpit .hud-title{font-size:27px}.cockpit .hud-sub{font-size:11px}.cockpit .hud-tags{margin-top:13px}.cockpit .side-status{top:13px;right:14px;min-width:unset;padding:7px 9px}.cockpit .side-status small{display:none}.cockpit .mirror{width:95px;height:28px}.cockpit .wheel{width:200px;height:200px;border-width:21px;bottom:-128px;right:-6px}.cockpit .wheel:before{top:57px}.cockpit .wheel:after{top:40px;left:45px;width:53px;height:53px}.cockpit .dashboard-strip{bottom:8px;left:40%;width:42%;min-width:160px;height:50px;gap:9px}.cockpit .dashboard-strip strong{font-size:18px}.cockpit .corner-tag{bottom:70px;left:20px}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
-@media(max-width:450px){.cockpit{height:330px}.cockpit .hud{top:50px}.cockpit .hud-title{font-size:25px}.cockpit .hud-sub{max-width:235px}.cockpit .hud-tags span{font-size:8px;padding:6px}.cockpit .side-status{top:12px}.cockpit .dashboard-strip{left:37%}.cockpit .corner-tag{display:none}.audio-controls{padding:10px}.audio-controls button{font-size:12px;padding:10px}}
-@media(prefers-reduced-motion:reduce){.cockpit .roadline{animation:none}}
-
-</style>""")
-
-# V6 compact cockpit: keep the original camera and status within one viewport.
-st.html("""<style>
-@media(min-width:781px){
-  .cockpit{height:245px;margin:7px 0 12px}
-  .cockpit .hud{top:36px;left:32px}
-  .cockpit .hud-title{font-size:27px;line-height:1.2}
-  .cockpit .hud-sub{font-size:11px;margin-top:7px}
-  .cockpit .hud-tags{margin-top:10px}
-  .cockpit .wheel{bottom:-170px}
-  .cockpit .dashboard-strip{bottom:3px}
-  .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:8px 0}
-  .metric-grid .card{min-height:76px;padding:10px}
-  .metric-grid .card .num{font-size:22px}
-}
-@media(max-width:780px){.cockpit{height:240px}.cockpit .hud{top:45px}.cockpit .hud-title{font-size:24px}}
-</style>""")
+st.set_page_config(page_title="AURA DRIVE | LOCAL VISION SYSTEM", page_icon="🚘", layout="wide", initial_sidebar_state="collapsed")
 
 
-
-# Live landmark thumbnail caption styling and mobile wrapping
-st.html("""<style>
-.roi-mini-title{font-size:11px;font-weight:800;letter-spacing:.12em;color:#a1ead7;margin-top:12px;margin-bottom:7px}
-.roi-mini-title span{float:right;color:#7d9aab;font-size:10px}
-[data-testid="stImage"] img{border-radius:11px}
-@media(max-width:780px){.roi-mini-title{font-size:10px}}
-</style>""")
-
-def model_paths():
-    team = Path(st.session_state.get("team_path", str(TEAM))).expanduser().resolve()
-    eye = Path(st.session_state.get("eyes_path", str(ROOT / "runs/eyes_yolo26n-cls/weights/best.pt"))).expanduser().resolve()
-    yawn = team / "runs/03_yawn_resnet18/weights/03_best.pt"
-    return eye, team, yawn, team / "models/face_landmarker.task"
+@st.cache_data(show_spinner=False)
+def hero_data(path: str):
+    p = Path(path)
+    return base64.b64encode(p.read_bytes()).decode("ascii") if p.is_file() else ""
 
 
-def missing_files(paths):
-    eye, team, yawn, _ = paths
-    return [str(p) for p in (eye, team / "03_yawn_common.py", yawn) if not p.is_file()]
+def base_styles():
+    st.html("""<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+KR:wght@400;500;600;700;800;900&display=swap');
+    :root {--mint:#62eacc;--ink:#080e16;--panel:#111d29;--edge:#26394a;--muted:#8fa6b7}
+    html, body,[data-testid="stApp"]{font-family:Inter,'Noto Sans KR',sans-serif;color:#eff8fb;background:#07101a}
+    [data-testid="stAppViewContainer"]{background:linear-gradient(155deg,#0a1721 0%,#080d16 50%,#060a11 100%)}
+    [data-testid="stMainBlockContainer"]{max-width:1510px;padding:1.05rem 2.0rem 4rem}
+    [data-testid="stHeader"]{background:transparent}
+    [data-testid="stToolbar"],#MainMenu,footer{visibility:hidden}
+    h1,h2,h3,h4{letter-spacing:-.05em;color:#f5fafb}
+    [data-testid="stCaptionContainer"] p{color:#89a3b4;font-size:12px}
+    [data-testid="stWidgetLabel"] p{color:#d4e6ef!important;font-weight:650!important}
+    [data-testid="stRadio"] [role="radiogroup"]{display:flex;gap:7px;flex-wrap:wrap}
+    [data-testid="stRadio"] [role="radiogroup"] label{border:1px solid #304457;background:#14212d;padding:8px 17px;border-radius:10px}
+    [data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){background:#1e4547;border-color:#62dfc5}
+    .stButton button{min-height:50px;border-radius:13px;font-size:15px;font-weight:800;border:1px solid #334b5e;background:#152433;color:#f1f8ff;transition:all .2s}
+    .stButton button:hover{transform:translateY(-1px);border-color:#69d9c4;color:#fff}
+    .stButton button[kind="primary"]{background:#69efd0;color:#06262a;border-color:#69efd0;box-shadow:0 8px 28px #39edc026}
+    .stButton button:disabled{opacity:.4;cursor:not-allowed}
+    .aura-nav{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #263748;padding:10px 3px 17px;margin-bottom:15px}
+    .aura-logo{font-weight:900;letter-spacing:.24em;font-size:18px;color:#f5ffff}.aura-logo span{color:#69efd0}
+    .aura-topright{font-size:11px;color:#9fb6c5;letter-spacing:.15em}
+    .aura-hero{position:relative;height:355px;overflow:hidden;border:1px solid #273b49;border-radius:24px;background:#07101a center 42%/cover no-repeat;box-shadow:0 26px 65px #0008;margin:4px 0 18px}
+    .aura-hero::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,#08111af2 0%,#07111b7e 35%,transparent 70%),linear-gradient(0deg,#07111b80,transparent 30%)}
+    .aura-hero.is-welcome{height:min(590px,65vh);min-height:405px;background-position:center center}
+    .aura-hero-copy{position:absolute;left:clamp(22px,4vw,67px);top:50%;transform:translateY(-50%);max-width:620px}
+    .aura-eyebrow{font-size:11px;color:#69e8c9;font-weight:800;letter-spacing:.24em;margin-bottom:12px}
+    .aura-h1{font-size:clamp(31px,4.3vw,59px);line-height:1.18;font-weight:900;letter-spacing:-.07em;color:#fff}
+    .aura-h1 em{color:#70ecd0;font-style:normal}
+    .aura-hero-sub{color:#d0dfe6;font-size:13px;line-height:1.95;margin-top:15px;max-width:480px}
+    .aura-hero-info{margin-top:22px;display:flex;gap:9px;flex-wrap:wrap}
+    .aura-hero-info b{font-size:10px;font-weight:700;letter-spacing:.05em;padding:7px 10px;background:#092835b3;border:1px solid #497c7c;border-radius:8px;color:#affce9}
+    .aura-stage{border:1px solid #24394c;background:linear-gradient(160deg,#121f2d,#0a141f);border-radius:20px;padding:16px;margin:8px 0;box-shadow:0 12px 35px #0003}
+    .aura-stage-title{display:flex;align-items:center;justify-content:space-between;margin:4px 0 14px}
+    .aura-stage-title b{color:#effbfb;font-size:15px;letter-spacing:-.02em}
+    .aura-stage-title small{font-size:10px;color:#72e3c8;letter-spacing:.17em;font-weight:750}
+    .aura-frame{border-radius:16px;background:#02070c;padding:8px;border:1px solid #2f4658;min-height:200px}
+    .aura-frame img{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:contain;border-radius:10px;background:#03070d}
+    .aura-idle{aspect-ratio:4/3;display:grid;place-items:center;text-align:center;background:radial-gradient(circle at 50% 30%,#17303d,#070f1a 70%);border-radius:10px;color:#d0e7ec}
+    .aura-idle strong{font-size:25px;letter-spacing:-.04em}.aura-idle span{font-size:12px;line-height:2;color:#90adbb}
+    .aura-status{border:1px solid #254b48;background:linear-gradient(105deg,#153b35,#112832);border-radius:14px;padding:17px 18px;margin:7px 0 14px}
+    .aura-status.warn{border-color:#92554a;background:linear-gradient(120deg,#532f30,#34262d)}
+    .aura-status.yawn{border-color:#987647;background:linear-gradient(120deg,#4f4229,#2c3029)}
+    .aura-status b{font-size:21px;color:#efffff}.aura-status p{margin:6px 0 0;color:#bad2d4;font-size:12px}
+    .aura-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+    .aura-kpi{border:1px solid #26394b;background:#0c1824;border-radius:12px;padding:16px}
+    .aura-kpi span{font-size:11px;color:#9bb0c2}.aura-kpi strong{display:block;font-size:27px;color:#fff;letter-spacing:-.05em;margin-top:7px}
+    .aura-kpi small{display:block;color:#69e6cc;font-size:10px;margin-top:7px}
+    .aura-progress{height:7px;border-radius:7px;background:#233444;overflow:hidden;margin-top:10px}
+    .aura-progress div{height:100%;background:linear-gradient(90deg,#40978b,#78f9d2);border-radius:7px}
+    .aura-mini{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+    .aura-section-note{font-size:12px;color:#93aab6;margin:12px 0}
+    .aura-footer{border-top:1px solid #293947;margin-top:36px;padding-top:13px;font-size:10px;color:#8aa6b7;letter-spacing:.06em}
+    [data-testid="stImage"] img{border-radius:11px}
+    [data-testid="stDataFrame"]{border-radius:11px;overflow:hidden}
+    .aura-hero:not(.is-welcome){height:178px;background-position:center 57%;margin-bottom:11px}
+    .aura-hero:not(.is-welcome) .aura-h1{font-size:clamp(24px,2.5vw,34px)}
+    .aura-hero:not(.is-welcome) .aura-hero-sub{font-size:11px;margin-top:6px}
+    .aura-hero:not(.is-welcome) .aura-hero-info{margin-top:8px}
+    .aura-hero:not(.is-welcome) .aura-hero-info b{padding:4px 8px}
+    .aura-stage-title{margin:8px 0 7px}
+    .aura-status{margin:0 0 10px;padding:14px 16px}
+    .aura-kpi{padding:12px}
+    .aura-kpi strong{font-size:25px}
+    .aura-progress{margin-top:7px}
+    .aura-eyestate{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#abc1cc;padding:6px 2px 0}
+    .aura-quiet{color:#9ab4bf;font-size:12px}
+    .aura-control-caption{font-size:11px;color:#a8c6d0;border:1px solid #2a4853;border-radius:12px;padding:10px 13px;background:#10232d}
+    .aura-start-banner{display:flex;justify-content:space-between;flex-wrap:wrap;align-items:center;gap:7px;background:#101f2c;border:1px solid #294c51;border-radius:13px;padding:10px 15px;margin:8px 0 12px;font-size:12px;color:#c8e1e5}
+    .aura-start-banner strong{color:#79efcf}
+    @media(max-width:900px){.aura-hero:not(.is-welcome){height:145px}.aura-hero:not(.is-welcome) .aura-h1{font-size:23px}.aura-hero:not(.is-welcome) .aura-hero-sub{display:none}
+[data-testid="stMainBlockContainer"]{padding:1rem .9rem 3rem}.aura-hero{height:285px;border-radius:14px}.aura-hero.is-welcome{min-height:430px}.aura-hero-copy{left:18px}.aura-h1{font-size:31px}.aura-hero-sub{font-size:11px}}
+    </style>""")
 
 
-def load_team(path):
-    spec = importlib.util.spec_from_file_location("teammate_yawn_common", path / "03_yawn_common.py")
-    if spec is None or spec.loader is None:
-        raise ImportError("팀원 03_yawn_common.py를 불러오지 못했어")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+def hero(welcome=False):
+    img = hero_data(str(CAR_FILE))
+    bg = f'url("data:image/jpeg;base64,{img}")' if img else 'linear-gradient(110deg,#0b2535,#132c3c)'
+    title = "AI가 운전자의<br><em>눈 감김과 하품을</em> 관찰합니다." if welcome else "운전자의 상태를<br><em>실시간으로 모니터링</em>"
+    sub = ("로컬 카메라와 사전학습 분류 모델로 졸음 징후를 시각화합니다. 차량 제어와 119 신고는 연결하지 않은 시뮬레이션입니다."
+           if welcome else "로컬 원본 영상은 부드럽게, AI는 별도 분석. 눈은 5초, 하품은 3초 연속 감지 후 경고합니다.")
+    cls = ' is-welcome' if welcome else ''
+    st.html(f'''<div class="aura-hero{cls}" style="background-image:{bg}">
+      <div class="aura-hero-copy"><div class="aura-eyebrow">AURA DRIVE  /  LOCAL VISION DEMO</div>
+      <div class="aura-h1">{title}</div><div class="aura-hero-sub">{sub}</div>
+      <div class="aura-hero-info"><b>눈 · YOLO26n + CLAHE</b><b>하품 · YOLO26s</b><b>CPU · LOCAL STREAM</b></div>
+      </div></div>''')
 
 
-@st.cache_resource(show_spinner="AI 모델 연결 중...")
-def get_models(eye_path, team_path, yawn_path, face_path):
-    from ultralytics import YOLO
-    team = load_team(Path(team_path))
-    device = team.choose_device("cpu")
-    yawn, ckpt = team.load_checkpoint(Path(yawn_path), device)
-    face = team.verify_face_model(Path(face_path), ckpt)
-    eyes = YOLO(str(eye_path))
-    closed_idx = next((int(k) for k, v in eyes.names.items() if str(v).lower() == "closed"), None)
-    if closed_idx is None:
-        raise ValueError("눈 모델에 Closed 클래스가 없음")
-    return dict(eyes=eyes, closed_idx=closed_idx, yawn=yawn, team=team, ckpt=ckpt,
-                face=face, device=device, trans=team.make_transform(training=False),
-                eye_lock=threading.RLock(), yawn_lock=threading.RLock())
-
-
-def eye_clahe(roi):
-    """Match the LAB L-channel CLAHE recipe in 15_roi_ablation.py."""
-    rgb = np.asarray(roi.convert("RGB"))
-    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
+def eye_clahe(roi: Image.Image) -> Image.Image:
+    a = np.asarray(roi.convert('RGB'))
+    lab = cv2.cvtColor(a, cv2.COLOR_RGB2LAB)
     lab[:, :, 0] = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4)).apply(lab[:, :, 0])
     return Image.fromarray(cv2.cvtColor(lab, cv2.COLOR_LAB2RGB))
-
-
-def mouth_variant(roi, variant):
-    if variant == "Grayscale (실험)":
-        return Image.fromarray(cv2.cvtColor(np.asarray(roi.convert("RGB")), cv2.COLOR_RGB2GRAY)).convert("RGB")
-    return roi.convert("RGB")
-
-
-def preview_bytes(image):
-    if image is None:
-        return None
-    im = image.copy().convert("RGB")
-    im.thumbnail((192, 128))
-    buf = io.BytesIO()
-    im.save(buf, format="JPEG", quality=78)
-    return buf.getvalue()
-
-
-# Visualization only: these dots are never added to classifier inputs.
-# The same FaceMesh result used for the eye crop provides preview landmarks.
-LIP_POINTS = (61, 40, 37, 0, 267, 270, 291, 321, 314, 17, 84, 91,
-              78, 81, 13, 311, 308, 402, 14, 178, 87, 82)
-
-
-def landmark_preview(image, face_result, indices_groups, pad_x=0.35, pad_y=0.55):
-    if not face_result or not face_result.multi_face_landmarks:
-        return None
-    rgb = np.asarray(image.convert("RGB"))
-    h, w = rgb.shape[:2]
-    lm = face_result.multi_face_landmarks[0].landmark
-    groups = []
-    for indices in indices_groups:
-        pts = [(float(lm[i].x * w), float(lm[i].y * h)) for i in indices]
-        groups.append(pts)
-    points = [pt for group in groups for pt in group]
-    if not points:
-        return None
-    xs, ys = zip(*points)
-    x0, x1 = min(xs), max(xs)
-    y0, y1 = min(ys), max(ys)
-    bw, bh = x1-x0, y1-y0
-    if bw < 4 or bh < 1:
-        return None
-    # Keep enough context to identify eyelids / lips while keeping preview compact.
-    xpad, ypad = max(8., bw*pad_x), max(8., max(bh, bw*.18)*pad_y)
-    left, top = max(0, int(x0-xpad)), max(0, int(y0-ypad))
-    right, bottom = min(w, int(x1+xpad)), min(h, int(y1+ypad))
-    if right-left < 10 or bottom-top < 10:
-        return None
-    preview = Image.fromarray(rgb[top:bottom, left:right].copy())
-    draw = ImageDraw.Draw(preview)
-    dot = max(1, min(3, round(preview.width/140)))
-    for gi, group in enumerate(groups):
-        color = "#5dffe0" if gi == 0 else "#f6c36e"
-        for x, y in group:
-            cx, cy = round(x-left), round(y-top)
-            draw.ellipse((cx-dot,cy-dot,cx+dot,cy+dot), fill=color,
-                         outline="#09212a", width=1)
-    return preview
 
 
 class CachedMesh:
     def __init__(self, result):
         self.result = result
-
-    def process(self, _rgb):
+    def process(self, _unused):
         return self.result
+
+
+LIP_POINTS = (61, 40, 37, 0, 267, 270, 291, 321, 314, 17, 84, 91,
+              78, 81, 13, 311, 308, 402, 14, 178, 87, 82)
+
+
+def landmark_preview(image, face_result, groups):
+    if not face_result or not face_result.multi_face_landmarks:
+        return None
+    rgb = np.asarray(image.convert('RGB'))
+    h, w = rgb.shape[:2]
+    lm = face_result.multi_face_landmarks[0].landmark
+    pts = [[(lm[i].x * w, lm[i].y * h) for i in group] for group in groups]
+    flat = [pt for group in pts for pt in group]
+    if not flat:
+        return None
+    xs, ys = zip(*flat)
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    span = max(8., x1-x0)
+    pad = max(8., span * .36)
+    left, right = max(0, int(x0-pad)), min(w, int(x1+pad))
+    top, bottom = max(0, int(y0-span*.36)), min(h, int(y1+span*.36))
+    if right-left < 10 or bottom-top < 10:
+        return None
+    out = Image.fromarray(rgb[top:bottom, left:right].copy())
+    d = ImageDraw.Draw(out)
+    for j, group in enumerate(pts):
+        color = '#70f5d7' if j == 0 else '#e5b76a'
+        for x,y in group:
+            cx,cy=round(x-left),round(y-top)
+            d.ellipse((cx-2,cy-2,cx+2,cy+2),fill=color,outline='#08222b')
+    return out
+
+
+def jpeg_thumb(image, size=(260,170)):
+    if image is None:
+        return None
+    img=image.copy().convert('RGB')
+    img.thumbnail(size)
+    buff=io.BytesIO()
+    img.save(buff,format='JPEG',quality=73)
+    return buff.getvalue()
+
+
+@st.cache_resource(show_spinner='기존 AI 가중치 로딩 중...')
+def models_cached(eye_path: str, yawn_path: str):
+    from ultralytics import YOLO
+    torch.set_num_threads(min(4, max(1, torch.get_num_threads())))
+    eyes=YOLO(eye_path)
+    names={int(k):str(v).lower() for k,v in eyes.names.items()}
+    closed_idx=next((k for k,v in names.items() if v=='closed'),None)
+    if closed_idx is None:
+        raise ValueError(f'눈 모델 클래스가 잘못됐어: {names}')
+    # The predictor comes from the same code used for the 393-image Roboflow evaluation.
+    comparator=importlib.import_module('31_yawn_external_compare')
+    yawn=comparator.Predictor('yolo26s',device='cpu')
+    if str(Path(yawn.file).resolve()).casefold()!=str(Path(yawn_path).resolve()).casefold():
+        raise ValueError('하품 모델 파일 경로가 31번 비교 코드의 경로와 달라.')
+    return dict(eyes=eyes,closed_idx=closed_idx,yawn=yawn,eye_lock=threading.RLock(),yawn_lock=threading.RLock())
+
+
+def face_focus_crop(image: Image.Image, result):
+    """Exploratory live-webcam crop. NOT the 31-image face baseline recipe."""
+    if not result or not result.multi_face_landmarks:
+        return image
+    landmarks=result.multi_face_landmarks[0].landmark
+    w,h=image.size
+    xs=[lm.x*w for lm in landmarks]
+    ys=[lm.y*h for lm in landmarks]
+    x0,x1=max(0,min(xs)),min(w,max(xs))
+    y0,y1=max(0,min(ys)),min(h,max(ys))
+    span=max(x1-x0,y1-y0)
+    pad=span*.25
+    box=(max(0,int(x0-pad)),max(0,int(y0-pad)),min(w,int(x1+pad)),min(h,int(y1+pad)))
+    if box[2]-box[0]<64 or box[3]-box[1]<64:
+        return image
+    return image.crop(box)
+
+
+class FaceEngine:
+    def __init__(self, models, cfg, static=False):
+        import mediapipe as mp
+        self.models=models
+        self.cfg=cfg
+        self.static=static
+        self.mesh=mp.solutions.face_mesh.FaceMesh(static_image_mode=static,max_num_faces=1,
+            refine_landmarks=True,min_detection_confidence=.5,min_tracking_confidence=.5)
+        self.lock=threading.RLock()
+
+    def predict(self, image):
+        with self.lock:
+            result=self.mesh.process(np.asarray(image.convert('RGB')))
+            eyes=crop_eyes(image,CachedMesh(result))
+            eye_pt=landmark_preview(image,result,(LEFT_EYE,RIGHT_EYE))
+            mouth_pt=landmark_preview(image,result,(LIP_POINTS,))
+            e=None
+            crop_eye=None
+            if eyes:
+                transformed=[to_square(eye_clahe(x) if self.cfg['eye_clahe'] else x,224) for x in eyes]
+                crop_eye=transformed[0]
+                with self.models['eye_lock']:
+                    predictions=self.models['eyes'].predict(transformed,imgsz=224,device='cpu',verbose=False)
+                    vals=[float(r.probs.data[self.models['closed_idx']]) for r in predictions]
+                e=sum(vals)/len(vals)
+            y=None
+            yawn_input=image.convert('RGB')
+            if self.cfg.get('yawn_view') == 'face_focus':
+                # Optional webcam experiment: focuses on the driver when the
+                # camera image contains lots of interior background.
+                yawn_input=face_focus_crop(yawn_input,result)
+            if self.static or result.multi_face_landmarks:
+                with self.models['yawn_lock']:
+                    # Never use the mouth ROI: trained classifier expects face context.
+                    # Baseline mode matches the 393-photo experiment's full-frame input.
+                    y=self.models['yawn'].probability(yawn_input)
+            return dict(eye=e,yawn=y,eye_processed=crop_eye,
+                mouth=to_square(yawn_input,224),eye_points=eye_pt,mouth_points=mouth_pt)
+
+    def close(self):
+        with self.lock:
+            self.mesh.close()
 
 
 class Monitor:
     def __init__(self):
-        self.lock = threading.RLock()
-        self.safety = None  # attached by Streamlit main thread
-        self.closed_since = None
-        self.yawn_since = None
-        self.closed_latched = False
-        self.yawn_latched = False
-        self.last_update = 0
-        self.last_yawn_event = 0
-        self.serial = 0
-        self.yawn_count = 0
-        self.events = deque(maxlen=100)
-        self.sounds = deque(maxlen=20)
-        self.data = dict(eye=None, yawn=None, duration=0., fps=0., mode="wait", eye_roi=None, mouth_roi=None, eye_points=None, mouth_points=None, eye_alert=False, yawn_alert=False)
+        self.lock=threading.RLock()
+        self.alert_logic=ContinuousAlerts(max_gap=1.6)
+        self.last_at=0.
+        self.events=deque(maxlen=80)
+        self.serial=0
+        self.yawn_count=0
+        self.eye_count=0
+        self.safety=None
+        self.data=dict(eye=None,yawn=None,duration=0.,yawn_duration=0.,fps=0.,mode='idle',
+                       eye_points=None,mouth_points=None,eye_roi=None,mouth_roi=None)
 
-    def update(self, eye, yawn, fps, cfg, eye_roi=None, mouth_roi=None, eye_points=None, mouth_points=None):
-        now = time.monotonic()
+    def reset(self):
         with self.lock:
-            if now - self.last_update > 1.5:
-                self.closed_since = self.yawn_since = None
-                self.closed_latched = self.yawn_latched = False
-            self.last_update = now
-            if eye is not None and eye >= cfg["eye"]:
-                self.closed_since = self.closed_since or now
-            else:
-                self.closed_since = None
-                self.closed_latched = False
-            duration = now - self.closed_since if self.closed_since is not None else 0.
-            if duration >= cfg["eye_sec"] and not self.closed_latched:
-                self.closed_latched = True
-                self.event("eye", eye)
-            if yawn is not None and yawn >= cfg["yawn"]:
-                self.yawn_since = self.yawn_since or now
-            else:
-                self.yawn_since = None
-                self.yawn_latched = False
-            if self.yawn_since is not None and now - self.yawn_since >= cfg["yawn_sec"] and not self.yawn_latched:
-                self.yawn_latched = True
-                self.last_yawn_event = now
-                self.yawn_count += 1
-                self.event("yawn", yawn)
-            mode = "eye" if duration >= cfg["eye_sec"] else "yawn" if now - self.last_yawn_event < 5 and self.last_yawn_event else "ok"
-            if eye is None and yawn is None:
-                mode = "wait"
-            self.data = dict(eye=eye, yawn=yawn, duration=duration, fps=fps, mode=mode,
-                             eye_alert=duration >= cfg["eye_sec"],
-                             yawn_alert=self.yawn_latched,
-                             eye_roi=preview_bytes(eye_roi), mouth_roi=preview_bytes(mouth_roi),
-                             eye_points=preview_bytes(eye_points), mouth_points=preview_bytes(mouth_points))
+            self.alert_logic.reset()
+            self.last_at=0.
+            self.data.update(eye=None,yawn=None,duration=0.,yawn_duration=0.,mode='idle')
 
-    def event(self, kind, p):
-        self.serial += 1
-        self.events.appendleft(dict(시간=datetime.now().strftime("%H:%M:%S"), 감지="눈 감김" if kind == "eye" else "하품", 확률=f"{p:.1%}"))
-        self.sounds.append(dict(id=self.serial, kind=kind))
-        if kind == "eye" and self.safety is not None:
+    def update(self,eye,yawn,fps,cfg,eye_roi=None,mouth_roi=None,eye_points=None,mouth_points=None):
+        now=time.monotonic()
+        with self.lock:
+            events=self.alert_logic.update(eye,yawn,cfg,now)
+            self.last_at=now
+            for kind in events:
+                if kind=='eye':
+                    self.eye_count+=1
+                    self._event('eye',eye)
+                else:
+                    self.yawn_count+=1
+                    self._event('yawn',yawn)
+            eye_state=self.alert_logic.eye
+            yawn_state=self.alert_logic.yawn
+            mode=('eye' if eye_state.latched else 'yawn' if yawn_state.latched else
+                  'pending_eye' if eye_state.since is not None else
+                  'pending_yawn' if yawn_state.since is not None else
+                  'ok' if eye is not None or yawn is not None else 'idle')
+            self.data=dict(eye=eye,yawn=yawn,duration=eye_state.duration,
+                yawn_duration=yawn_state.duration,fps=fps,mode=mode,
+                eye_points=jpeg_thumb(eye_points),mouth_points=jpeg_thumb(mouth_points),
+                eye_roi=jpeg_thumb(eye_roi),mouth_roi=jpeg_thumb(mouth_roi))
+
+    def _event(self,kind,prob):
+        self.serial+=1
+        self.events.appendleft(dict(id=self.serial,time=datetime.now().strftime('%H:%M:%S'),kind=kind,
+            label='눈 감김' if kind=='eye' else '하품',score=f'{prob:.1%}' if prob is not None else '-'))
+        if kind=='eye' and self.safety is not None:
             self.safety.on_eye_warning()
 
     def snapshot(self):
         with self.lock:
-            if time.monotonic() - self.last_update > 2:
-                return dict(eye=None, yawn=None, duration=0., fps=0., mode="wait", eye_roi=None, mouth_roi=None, eye_points=None, mouth_points=None, eye_alert=False, yawn_alert=False), list(self.events), list(self.sounds)
-            return dict(self.data), list(self.events), list(self.sounds)
+            d=dict(self.data)
+            if time.monotonic()-self.last_at>2:
+                d.update(eye=None,yawn=None,duration=0.,yawn_duration=0.,mode='idle')
+            return d,list(self.events),self.eye_count,self.yawn_count
 
 
-class Engine:
-    def __init__(self, m, cfg, static=False):
-        import mediapipe as mp
-        self.m = m
-        self.cfg = cfg
-        self.mesh = mp.solutions.face_mesh.FaceMesh(static_image_mode=static, max_num_faces=1,
-            refine_landmarks=True, min_detection_confidence=.5, min_tracking_confidence=.5)
-        self.mouth = m["team"].MouthExtractor(m["face"], m["team"].CropConfig(**m["ckpt"]["crop_config"]))
-        self.lock = threading.RLock()
-
-    def predict(self, im):
-        with self.lock:
-            # One FaceMesh pass for both eye inference and landmark previews.
-            face_result = self.mesh.process(np.asarray(im.convert("RGB")))
-            eyes = crop_eyes(im, CachedMesh(face_result))
-            eye_points = landmark_preview(im, face_result, (LEFT_EYE, RIGHT_EYE), pad_x=.22, pad_y=.8)
-            mouth_points = landmark_preview(im, face_result, (LIP_POINTS,), pad_x=.40, pad_y=.62)
-            e = None
-            if eyes:
-                # Batch left/right eye in one YOLO invocation to reduce CPU overhead.
-                inputs = [to_square(eye_clahe(c) if self.cfg["eye_clahe"] else c, 224) for c in eyes]
-                with self.m["eye_lock"]:
-                    predictions = self.m["eyes"].predict(inputs, imgsz=224, device="cpu", verbose=False)
-                    p = [float(result.probs.data[self.m["closed_idx"]]) for result in predictions]
-                e = sum(p) / len(p)
-            res = self.mouth.extract(im)
-            crop = res.get("crop") if res.get("status") == "ok" else None
-            y = None
-            if crop is not None:
-                t = self.m["trans"](mouth_variant(crop, self.cfg["yawn_color"])).unsqueeze(0).to(self.m["device"])
-                with self.m["yawn_lock"], torch.inference_mode():
-                    y = float(self.m["yawn"](t).softmax(1)[0, 1])
-            return dict(eye=e, yawn=y, eyes=eyes, mouth=crop, eye_processed=eye_clahe(eyes[0]) if eyes and self.cfg["eye_clahe"] else (eyes[0] if eyes else None),
-                        eye_points=eye_points, mouth_points=mouth_points)
-
-    def close(self):
-        self.mesh.close()
-        self.mouth.close()
+def params():
+    return dict(eye=float(st.session_state.eye_threshold), yawn=float(st.session_state.yawn_threshold),
+                eye_seconds=float(st.session_state.eye_seconds),yawn_seconds=float(st.session_state.yawn_seconds),
+                eye_clahe=bool(st.session_state.eye_clahe),
+                yawn_view=st.session_state.get('yawn_view', 'full'))
 
 
-
-class LatestFrameWorker:
-    """Keep WebRTC frames fluid; inference consumes the latest frame only.
-
-    The callback never waits for YOLO, MediaPipe, or ResNet. Old queued frames
-    are discarded instead of building up seconds of video latency.
-    """
-    def __init__(self, engine, monitor, interval_ms=250, max_width=640):
-        self.engine = engine
-        self.monitor = monitor
-        self.interval = max(0.08, interval_ms / 1000.)
-        self.max_width = max_width
-        self.lock = threading.Lock()
-        self.latest = None
-        self.frame_fps = 0.0
-        self.last_frame_time = None
-        self.last_inference_start = 0.0
-        self.inference_count = 0
-        self.stop_event = threading.Event()
-        self.worker = threading.Thread(target=self._work, daemon=True, name="aura-ai-worker")
-        self.worker.start()
-
-    def submit(self, bgr):
-        now = time.monotonic()
-        h, w = bgr.shape[:2]
-        if w > self.max_width:
-            bgr = cv2.resize(bgr, (self.max_width, round(h * self.max_width / w)), interpolation=cv2.INTER_AREA)
-        with self.lock:
-            if self.last_frame_time is not None:
-                instant_fps = 1. / max(0.001, now - self.last_frame_time)
-                self.frame_fps = instant_fps if not self.frame_fps else .85 * self.frame_fps + .15 * instant_fps
-            self.last_frame_time = now
-            self.latest = bgr
-
-    def _work(self):
-        while not self.stop_event.is_set():
-            start = time.monotonic()
-            with self.lock:
-                ready = self.latest is not None
-                if ready and start - self.last_inference_start >= self.interval:
-                    frame = self.latest
-                    self.latest = None
-                    self.last_inference_start = start
-                    fps = self.frame_fps
-                else:
-                    frame = None
-            if frame is None:
-                self.stop_event.wait(0.015)
-                continue
-            try:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                result = self.engine.predict(Image.fromarray(rgb))
-                self.monitor.update(result["eye"], result["yawn"], fps, self.engine.cfg,
-                                    eye_roi=result["eye_processed"], mouth_roi=result["mouth"],
-                                    eye_points=result["eye_points"], mouth_points=result["mouth_points"])
-                self.inference_count += 1
-            except Exception as exc:
-                print(f"[AURA ASYNC INFERENCE ERROR] {type(exc).__name__}: {exc}", flush=True)
-
-    def close(self):
-        self.stop_event.set()
-        self.worker.join(timeout=1.)
+def get_running_camera():
+    return st.session_state.get('local_camera')
 
 
-class LocalCameraStream:
-    """Capture from a camera attached to the machine running Streamlit."""
-
-    def __init__(self, device_index, inference_worker):
-        self.device_index = device_index
-        self.inference_worker = inference_worker
-        self.capture = None
-        self.latest = None
-        self.lock = threading.Lock()
-        self.stop_event = threading.Event()
-        self.thread = None
-        self.running = False
-        self.error = None
-        self.fps = 0.0
-        self.last_frame_at = 0.0
-
-    def start(self):
-        if self.running:
-            return True
-        capture = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW)
-        if not capture.isOpened():
-            capture.release()
-            capture = cv2.VideoCapture(self.device_index)
-        if not capture.isOpened():
-            capture.release()
-            self.error = f"카메라 {self.device_index}번을 열지 못했습니다. 장치 번호와 권한을 확인하세요."
-            return False
-        capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self.capture = capture
-        self.stop_event.clear()
-        self.running = True
-        self.error = None
-        self.thread = threading.Thread(target=self._read_frames, daemon=True, name="aura-local-camera")
-        self.thread.start()
-        return True
-
-    def _read_frames(self):
-        capture = self.capture
-        while not self.stop_event.is_set():
-            ok, frame = capture.read()
-            if not ok:
-                self.error = "카메라 프레임을 읽지 못했습니다. 연결 상태를 확인하세요."
-                self.stop_event.wait(0.1)
-                continue
-            now = time.monotonic()
-            if self.last_frame_at:
-                instant_fps = 1.0 / max(0.001, now - self.last_frame_at)
-                self.fps = instant_fps if not self.fps else 0.85 * self.fps + 0.15 * instant_fps
-            self.last_frame_at = now
-            self.error = None
-            self.inference_worker.submit(frame)
-            with self.lock:
-                self.latest = frame
-
-    def snapshot(self):
-        with self.lock:
-            frame = self.latest.copy() if self.latest is not None else None
-        age = time.monotonic() - self.last_frame_at if self.last_frame_at else float("inf")
-        return frame if age <= 1.0 else None, self.fps, age, self.error
-
-    def stop(self):
-        self.stop_event.set()
-        if self.capture is not None:
-            self.capture.release()
-            self.capture = None
-        if self.thread is not None and self.thread is not threading.current_thread():
-            self.thread.join(timeout=2.0)
-        self.running = False
+def shutdown_camera():
+    cam=st.session_state.pop('local_camera',None)
+    if cam is not None:
+        cam.stop()
+    worker=st.session_state.pop('local_worker',None)
+    if worker is not None:
+        worker.close()
+    st.session_state.monitor.reset()
+    engine=st.session_state.pop('local_engine',None)
+    if engine is not None:
+        engine.close()
 
 
-# =============================================================
-# Car atmosphere is CSS applied AROUND the local camera preview.
-# The original video frame is never segmented, filtered, flipped,
-# cropped or annotated for display. Eyes/mouth ROI are extracted
-# privately for inference ONLY, not shown on the live camera feed.
-# =============================================================
-
-def cabin_frame_style():
-    """Decorate the Streamlit container, not the video pixels."""
-    photo = ROOT / "aura_car_interior.jpg"
-    background = "linear-gradient(140deg, #152a3b, #0b1624)"
-    if photo.is_file():
-        uri = base64.b64encode(photo.read_bytes()).decode("ascii")
-        background = (
-            "linear-gradient(160deg,rgba(7,20,32,.55),rgba(7,18,27,.72)),"
-            f'url("data:image/jpeg;base64,{uri}")'
-        )
-    st.html(f"""<style>
-    .st-key-aura_camera_frame {{
-        background-image: {background};
-        background-position: center center;
-        background-size: cover;
-        border: 1px solid #42757b;
-        border-radius: 22px;
-        padding: 22px 18px 18px;
-        box-shadow: 0 20px 48px #0007;
-    }}
-    .st-key-aura_camera_frame [data-testid="stWebRtcPlayer"] {{
-        border-radius: 14px;
-        overflow: hidden;
-    }}
-    @media (max-width: 700px) {{
-        .st-key-aura_camera_frame {{padding: 12px 8px; border-radius: 16px;}}
-    }}
-    </style>""")
+def launch_camera():
+    shutdown_camera()
+    missing=[str(p) for p in (EYE_FILE,YAWN_FILE) if not p.is_file()]
+    if missing:
+        return '모델 가중치를 찾을 수 없어:\n'+'\n'.join(missing)
+    try:
+        m=models_cached(str(EYE_FILE.resolve()),str(YAWN_FILE.resolve()))
+        st.session_state.monitor.reset()
+        engine=FaceEngine(m,params())
+        worker=LatestFrameWorker(engine,st.session_state.monitor,interval_ms=int(st.session_state.infer_interval),max_width=640)
+        size=(640,480) if st.session_state.camera_resolution=='640×480 (권장)' else (1280,720)
+        cam=LocalCameraStream(st.session_state.camera_index,worker,width=size[0],height=size[1],
+                              jpeg_quality=65,preview_fps=20)
+        if not cam.start():
+            worker.close()
+            engine.close()
+            return cam.error
+        st.session_state.local_engine=engine
+        st.session_state.local_worker=worker
+        st.session_state.local_camera=cam
+        return ''
+    except Exception as e:
+        return f'{type(e).__name__}: {e}'
 
 
-def kpi(title, value, note):
-    st.html(f'<div class="card"><div class="label">{title}</div><div class="num">{value}</div><div class="foot">{note}</div></div>')
 
 
-def audio_controls():
-    files = [ROOT / "눈감김.mp3", ROOT / "하품.mp3"]
-    if not all(p.is_file() for p in files):
-        st.warning("🔇 음성 파일이 없어. VisionProject 최상위에 눈감김.mp3, 하품.mp3 두 개를 넣어줘.")
-        return
-    src1, src2 = [base64.b64encode(p.read_bytes()).decode("ascii") for p in files]
-    js = """<div class="audio-controls"><button id="aura-toggle" class="off">🔇 사운드 켜기</button>
-<button id="aura-eye">눈 감김 소리 테스트</button><button id="aura-yawn">하품 소리 테스트</button>
-<span class="audio-hint" id="aura-hint">경고는 한 이벤트에 한 번씩 재생됩니다.</span></div>
-<script>(function(){
-if(!window.AURA){
-  let sounds={eye:new Audio('data:audio/mpeg;base64,__EYE__'),yawn:new Audio('data:audio/mpeg;base64,__YAWN__')};
-  window.AURA={enabled:false,last:0,playing:null,queue:[],sounds:sounds};
-  for(let [kind,a] of Object.entries(sounds))a.onended=()=>{window.AURA.playing=null;window.AURA.next();};
-  window.AURA.next=function(){if(!this.enabled||this.playing||!this.queue.length)return;
-    let type=this.queue.shift(),a=this.sounds[type];this.playing=type;a.currentTime=0;
-    a.play().catch(()=>{this.playing=null;});};
-  window.AURA.push=function(kind){if(!this.enabled||this.queue.includes(kind)||this.playing===kind)return;
-    if(kind==='eye'&&this.playing==='yawn'){this.sounds.yawn.pause();this.sounds.yawn.currentTime=0;this.playing=null;}
-    kind==='eye'?this.queue.unshift(kind):this.queue.push(kind);this.next();};
-  window.AURA.sync=function(events){for(const e of events){if(e.id<=this.last)continue;
-    this.last=e.id;this.push(e.kind);}};
-}
-const a=window.AURA,button=document.getElementById('aura-toggle');
-function paint(){button.textContent=a.enabled?'🔊 사운드 켜짐':'🔇 사운드 켜기';button.classList.toggle('off',!a.enabled);}
-button.onclick=()=>{a.enabled=!a.enabled;if(!a.enabled){a.queue=[];for(const s of Object.values(a.sounds)){s.pause();s.currentTime=0;}a.playing=null;}paint();};
-document.getElementById('aura-eye').onclick=()=>{a.enabled=true;paint();a.push('eye');};
-document.getElementById('aura-yawn').onclick=()=>{a.enabled=true;paint();a.push('yawn');};paint();
-})();</script>"""
-    st.html(js.replace("__EYE__", src1).replace("__YAWN__", src2), unsafe_allow_javascript=True)
+def probs_panel():
+    @st.fragment(run_every='500ms')
+    def fragment():
+        monitor=st.session_state.monitor
+        data,events,eyes,yawns=monitor.snapshot()
+        mode=data['mode']
+        eng=st.session_state.get('local_engine')
+        applied=eng.cfg if eng is not None else params()
+        et,yt=applied['eye_seconds'],applied['yawn_seconds']
+        titles={'eye':'🚨 눈 감김 경고','yawn':'⚠️ 하품 경고',
+                'pending_eye':'눈 감김 확인 중','pending_yawn':'하품 확인 중',
+                'ok':'● 정상 모니터링','idle':'○ 카메라 연결 대기'}
+        subtitles={'eye':f'{et:g}초 이상 연속 감지되어 경고가 발생했습니다.',
+                   'yawn':f'{yt:g}초 이상 연속 감지되어 경고가 발생했습니다.',
+                   'pending_eye':f'눈 감김이 이어지면 {et:g}초 후에 경고합니다.',
+                   'pending_yawn':f'하품 신호가 이어지면 {yt:g}초 후에 경고합니다.',
+                   'ok':'AI가 눈과 하품 상태를 계속 확인하고 있습니다.',
+                   'idle':'카메라를 시작하면 이곳에 분석 결과가 나타납니다.'}
+        cls='warn' if mode=='eye' else 'yawn' if mode=='yawn' else ''
+        st.html(f'<div class="aura-status {cls}"><b>{titles[mode]}</b><p>{subtitles[mode]}</p></div>')
+        e,y=data['eye'],data['yawn']
+        def fmt(x):return f'{x*100:.1f}%' if x is not None else '—'
+        v1=max(0,min(100,int(e*100))) if e is not None else 0
+        v2=max(0,min(100,int(y*100))) if y is not None else 0
+        ed,yd=data['duration'],data['yawn_duration']
+        ep=min(100,100*ed/et) if et>0 else 0
+        yp=min(100,100*yd/yt) if yt>0 else 0
+        st.html(f'''<div class="aura-kpis">
+          <div class="aura-kpi"><span>👁 눈 감김 분류 점수</span><strong>{fmt(e)}</strong>
+            <div class="aura-progress"><div style="width:{v1}%"></div></div>
+            <small>YOLO26n · 눈 ROI + CLAHE</small></div>
+          <div class="aura-kpi"><span>◉ 하품 분류 점수</span><strong>{fmt(y)}</strong>
+            <div class="aura-progress"><div style="width:{v2}%"></div></div>
+            <small>YOLO26s · {('원본 RGB' if applied.get('yawn_view')=='full' else '얼굴 중심 실험 입력')}</small></div>
+          <div class="aura-kpi"><span>눈 감김 연속 유지</span><strong>{ed:.1f} / {et:.0f}초</strong>
+            <div class="aura-progress"><div style="width:{ep:.0f}%"></div></div>
+            <small>{et:g}초 경과 후 경고음 1회</small></div>
+          <div class="aura-kpi"><span>하품 연속 유지</span><strong>{yd:.1f} / {yt:.0f}초</strong>
+            <div class="aura-progress"><div style="width:{yp:.0f}%"></div></div>
+            <small>{yt:g}초 경과 후 경고음 1회</small></div>
+        </div>''')
+        st.html(f'<div class="aura-eyestate"><span>기준: 눈 ≥ {applied["eye"]:.2f} / 하품 ≥ {applied["yawn"]:.2f}</span><span>이번 세션 경고: 눈 {eyes}회 · 하품 {yawns}회</span></div>')
+        worker=st.session_state.get('local_worker')
+        cam=st.session_state.get('local_camera')
+        if cam and cam.running:
+            _,fps,age,error=cam.snapshot()
+            st.caption(f'로컬 카메라 {fps:.1f} FPS · AI {worker.fps:.1f} FPS · 추론 {worker.elapsed_ms:.0f}ms · 화면 지연 {age*1000:.0f}ms' if worker else '카메라 연결 중')
+            if worker and worker.error:st.warning('AI 처리 오류: '+worker.error)
+            if error:st.warning('카메라 오류: '+error)
+        st.html('<div class="aura-section-note">얼굴 랜드마크 · 눈/입 인식 상태</div>')
+        a,b=st.columns(2,gap='small')
+        with a:
+            if data['eye_points'] is not None:st.image(data['eye_points'],caption='눈 위치 추적',width='stretch')
+            else:st.caption('눈 ROI 미검출')
+        with b:
+            if data['mouth_points'] is not None:st.image(data['mouth_points'],caption='입 위치 추적',width='stretch')
+            else:st.caption('입 ROI 미검출')
+        with st.expander('분류기에 넣은 실제 이미지 · 경고 이력'):
+            a,b=st.columns(2)
+            with a:
+                if data['eye_roi']:st.image(data['eye_roi'],caption='눈: MediaPipe ROI + CLAHE',width='stretch')
+            with b:
+                if data['mouth_roi']:st.image(data['mouth_roi'],caption='하품: 실제 RGB 분류 입력',width='stretch')
+            if events:
+                st.dataframe([dict(시간=x['time'],이벤트=x['label'],점수=x['score']) for x in events],
+                             hide_index=True,width='stretch')
+            else:st.caption('아직 경고가 없습니다.')
+        st.caption('표시 점수는 보정된 위험 확률이 아니라 모델의 분류 출력입니다.')
+    fragment()
 
 
-def startup_screen():
-        photo = ROOT / "aura_car_interior.jpg"
-        image_uri = base64.b64encode(photo.read_bytes()).decode("ascii") if photo.is_file() else ""
-        image_layer = f'url("data:image/jpeg;base64,{image_uri}")' if image_uri else "linear-gradient(130deg,#142c40,#07111c)"
-        st.html(f"""<style>
-        .ignition-screen{{position:relative;isolation:isolate;overflow:hidden;min-height:min(650px,76vh);display:flex;align-items:center;
-            padding:clamp(28px,6vw,88px);border:1px solid #496978;border-radius:26px;
-            background:linear-gradient(90deg,rgba(4,11,19,.94),rgba(7,18,28,.76) 54%,rgba(7,14,23,.28)),{image_layer} center 54%/cover;
-            box-shadow:0 28px 90px #0009,inset 0 0 100px #02070c;animation:ignitionIn .9s ease-out both}}
-        .ignition-screen:before{{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,transparent 58%,#07111ae8),linear-gradient(0deg,transparent 72%,#142a3b55)}}
-        .ignition-scan{{position:absolute;inset:-30% 0 auto;height:2px;background:linear-gradient(90deg,transparent,#9dffe5,transparent);box-shadow:0 0 24px #7af4d6;animation:ignitionScan 2.8s .2s ease-out both}}
-        .ignition-copy{{max-width:760px;position:relative;z-index:2}}
-        .ignition-kicker{{color:#8bf4d9;font-size:12px;font-weight:800;letter-spacing:.22em;animation:bootRise .55s .2s both}}
-        .ignition-title{{font-size:clamp(46px,7vw,86px);font-weight:900;line-height:1.04;color:#f2fbff;margin:18px 0 14px;text-shadow:0 4px 26px #000;animation:bootRise .65s .45s both}}
-        .ignition-title span{{color:#8df5d9}}
-        .ignition-sub{{color:#c3d5df;font-size:17px;line-height:1.7;animation:bootRise .65s .68s both}}
-        .ignition-cluster{{display:flex;gap:12px;flex-wrap:wrap;margin-top:34px}}
-        .ignition-check{{min-width:145px;padding:13px 15px;border:1px solid #49616d;background:#081621b8;border-radius:11px;animation:bootDrop .45s both}}
-        .ignition-check:nth-child(1){{animation-delay:.9s}}.ignition-check:nth-child(2){{animation-delay:1.08s}}.ignition-check:nth-child(3){{animation-delay:1.26s}}.ignition-check:nth-child(4){{animation-delay:1.44s}}
-        .ignition-check small{{display:block;color:#84a5b4;font-size:10px;font-weight:800;letter-spacing:.14em}}
-        .ignition-check b{{display:block;color:#e8fff8;font-size:14px;margin-top:7px}}
-        .ignition-led{{display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:#79f2d2;box-shadow:0 0 12px #79f2d2;animation:ledIgnite .65s steps(2,end) infinite}}
-        .ignition-warning{{margin-top:24px;color:#d0aa72;font-size:12px;animation:bootRise .5s 1.6s both}}
-        @keyframes ignitionIn{{from{{opacity:0;transform:scale(1.025)}}to{{opacity:1;transform:scale(1)}}}}
-        @keyframes ignitionScan{{0%{{top:-4%;opacity:0}}15%{{opacity:1}}100%{{top:100%;opacity:0}}}}
-        @keyframes bootRise{{from{{opacity:0;transform:translateY(22px)}}to{{opacity:1;transform:translateY(0)}}}}
-        @keyframes bootDrop{{from{{opacity:0;transform:translateY(-18px)}}to{{opacity:1;transform:translateY(0)}}}}
-        @keyframes ledIgnite{{to{{opacity:.24}}}}
-        @media(max-width:680px){{.ignition-screen{{min-height:74vh;padding:25px 20px;border-radius:18px;background-position:60% center}}.ignition-sub{{font-size:14px}}.ignition-check{{min-width:calc(50% - 8px);box-sizing:border-box}}}}
-        @media(prefers-reduced-motion:reduce){{.ignition-screen,.ignition-kicker,.ignition-title,.ignition-sub,.ignition-check,.ignition-warning,.ignition-scan{{animation:none!important}}}}
-        </style><section class="ignition-screen"><div class="ignition-scan"></div><div class="ignition-copy">
-            <div class="ignition-kicker">AURA DRIVE · LOCAL DRIVER MONITOR</div>
-            <div class="ignition-title">시동을 걸고<br><span>운전자 모니터링을 시작합니다</span></div>
-            <div class="ignition-sub">계기판 시동 연출 후 대시보드에서 AI와 로컬 카메라를 연결합니다.<br>실제 카메라 연결은 입장 후 직접 시작합니다.</div>
-            <div class="ignition-cluster">
-                <div class="ignition-check"><small>01 · CAMERA</small><b><i class="ignition-led"></i>LOCAL DEVICE</b></div>
-                <div class="ignition-check"><small>02 · EYES</small><b><i class="ignition-led"></i>YOLO26N</b></div>
-                <div class="ignition-check"><small>03 · MOUTH</small><b><i class="ignition-led"></i>RESNET18</b></div>
-                <div class="ignition-check"><small>04 · RESPONSE</small><b><i class="ignition-led"></i>SIMULATION ONLY</b></div>
-            </div>
-            <div class="ignition-warning">실제 차량 제어·긴급 신고 없음 · 연구/시연용 프로토타입</div>
-        </div></section>""")
-        _, enter, _ = st.columns([1, 1.5, 1])
-        with enter:
-                if st.button("시동 걸고 시스템 입장", type="primary", width="stretch", key="aura_ignition_enter"):
-                        st.session_state.aura_started = True
-                        st.rerun()
-        st.caption("SYSTEM CHECK · 카메라 연결은 대시보드에서 직접 시작합니다.")
+def safety_panel():
+    st.markdown('### 안전 대응 시뮬레이션')
+    st.caption('가상 차량 감속·정차 및 SOS 화면만 구현. 차량 장치나 119에 연결되지 않습니다.')
+    safety=st.session_state.safety
+    @st.fragment(run_every='1s')
+    def safety_status():
+        safety.configure(st.session_state.fast_demo)
+        v=safety.tick()
+        names={'monitor':'대기 / 정상','stopping':'가상 감속 중','rest':'가상 정차 / 휴식',
+               'ready':'운전자 확인 완료','unresponsive':'가상 무반응 대기','sos':'모의 119 알림'}
+        m1,m2,m3=st.columns(3)
+        m1.metric('시뮬레이션 상태',names.get(v['mode'],v['mode']))
+        m2.metric('가상 속도',f"{v['speed']:.0f} km/h")
+        m3.metric('눈 감김 경고 / 5분',f"{v['recent_eye_events']}회")
+        if v['mode']=='stopping':st.progress(max(0.,min(1.,1-v['speed']/80.)))
+        if v['mode']=='rest':st.success('가상 정차 완료 · 창문 열림(시뮬레이션)')
+        if v['mode']=='unresponsive':st.warning(f"시나리오 남은 시간 {v['response_remaining']:.0f}초 · 의식 상태를 측정하는 기능이 아닙니다.")
+        if v['mode']=='sos':st.error('모의 119 화면입니다. 실제 신고는 하지 않습니다.')
+        with st.expander('시뮬레이션 이벤트 기록'):
+            st.dataframe(v['events'],hide_index=True,width='stretch')
+    safety_status()
+    a,b,c,d=st.columns(4,gap='small')
+    with a:
+        if st.button('가상 안전 정차',width='stretch',key='sim_stop'):
+            safety.start_stop_demo();st.rerun()
+    with b:
+        if st.button('무반응 시나리오',width='stretch',key='sim_unresponsive'):
+            safety.start_unresponsive_demo();st.rerun()
+    with c:
+        if st.button('운전자 응답 확인',width='stretch',key='sim_ack'):
+            safety.respond();st.rerun()
+    with d:
+        if st.button('↺ 초기화',width='stretch',key='sim_reset'):
+            safety.reset();st.rerun()
+    st.caption('빠른 시연: 휴식 15초·무반응 30초 / 기본: 5분·10분. 시간은 의료·안전 기준이 아니라 연출 값입니다.')
 
 
-def sound_events(events):
-    st.html("<script>window.AURA?.sync(" + json.dumps(events) + ");</script>", unsafe_allow_javascript=True)
+# ---- session defaults and persistent objects ----
+for k,v in dict(started=False,camera_index=0,camera_resolution='640×480 (권장)',infer_interval=350,
+                eye_threshold=.25,yawn_threshold=.50,eye_seconds=5.0,yawn_seconds=3.0,
+                eye_clahe=True,yawn_view='full',fast_demo=True,camera_notice='').items():
+    st.session_state.setdefault(k,v)
+if st.session_state.get('aura_settings_revision')!='v12_5s_3s':
+    st.session_state.eye_seconds=5.0
+    st.session_state.yawn_seconds=3.0
+    st.session_state.aura_settings_revision='v12_5s_3s'
+if 'monitor' not in st.session_state:st.session_state.monitor=Monitor()
+if 'safety' not in st.session_state:st.session_state.safety=SafetySimulation()
+st.session_state.monitor.safety=st.session_state.safety
+base_styles()
 
+st.html('<div class="aura-nav"><div class="aura-logo">AURA <span>DRIVE</span></div><div class="aura-topright">LOCAL DEMO • YOLO26n / YOLO26s • SIMULATION ONLY</div></div>')
 
-for key, val in {"eye_t": .25, "yawn_t": .15, "eye_s": 2., "yawn_s": 1.5, "stride": 2, "eye_clahe": True, "yawn_color": "RGB (기본)", "aura_demo_fast": False}.items():
-    st.session_state.setdefault(key, val)
-cfg = dict(eye=st.session_state.eye_t, yawn=st.session_state.yawn_t,
-           eye_sec=st.session_state.eye_s, yawn_sec=st.session_state.yawn_s,
-           stride=st.session_state.stride, eye_clahe=st.session_state.eye_clahe, yawn_color=st.session_state.yawn_color)
-paths = model_paths()
-missing = missing_files(paths)
-
-if "aura_started" not in st.session_state:
-    st.session_state.aura_started = False
-if not st.session_state.aura_started:
-    startup_screen()
+if not st.session_state.started:
+    hero(welcome=True)
+    st.html('<div class="aura-start-banner"><span><strong>로컬 전용 AI 모니터</strong> · 눈 5초 · 하품 3초 경고 · 화면 원본 유지</span><span>AI ON CPU  /  NO CLOUD</span></div>')
+    left,center,right=st.columns([.45,1.3,1.2])
+    with center:
+        if st.button('▶  로컬 웹캠과 AI 시작',type='primary',width='stretch',key='enter_and_start'):
+            st.session_state.started=True
+            st.session_state.camera_notice=launch_camera()
+            st.rerun()
+    with right:
+        if st.button('대시보드만 먼저 보기',width='stretch',key='enter_only'):
+            st.session_state.started=True
+            st.rerun()
+    st.caption('카메라를 바로 켜거나, 연결 전에 설정·분류기를 확인할 수 있습니다. 소리는 모니터 화면에서 별도 활성화하세요.')
+    st.html('<div class="aura-footer">로컬 웹캠 · 실제 차량/긴급 신고 연결 없음 · 교육용 프로토타입</div>')
     st.stop()
 
-st.html('<div class="brand"><div><b>AURA <span>DRIVE</span></b><br><small>INTELLIGENT DRIVER MONITORING</small></div><small>◉ AI VISION SYSTEM</small></div>')
-page = st.radio("메뉴", ["실시간 모니터", "이미지 분석", "설정"], horizontal=True, label_visibility="collapsed")
+page=st.radio('대시보드 메뉴',['실시간 모니터','사진 분석','안전 대응 시뮬레이션','설정'],horizontal=True,label_visibility='collapsed')
+if page!='실시간 모니터':
+    cam=get_running_camera()
+    if cam is not None and cam.running:shutdown_camera()
 
-if page != "실시간 모니터":
-    local_camera = st.session_state.get("aura_local_camera")
-    if local_camera is not None and local_camera.running:
-        local_camera.stop()
-
-if page == "실시간 모니터":
-    audio_controls()
-    st.html("""<div class="cockpit" id="aura-cockpit" role="img" aria-label="운전석 시점으로 보이는 앞유리, 도로, 대시보드와 핸들">
-      <div class="sky"></div><div class="sun"></div><div class="mountains"></div><div class="shoulder"></div>
-      <div class="road"></div><div class="roadline"></div><div class="car-ahead"></div>
-      <div class="windshield"></div><div class="pillar-left"></div><div class="pillar-right"></div>
-      <div class="mirror"></div><div class="cabin-glow"></div><div class="dash"></div>
-      <div class="dashboard-strip"><span>AI</span><strong>DRIVE</strong><span>● LIVE</span></div><div class="wheel"></div>
-      <div class="hud"><div class="hud-kicker">● INTELLIGENT DRIVER MONITORING</div>
-        <div class="hud-title">운전석에서 함께하는<br><span>AI 졸음 감지</span></div>
-        <div class="hud-sub">눈을 감거나 하품하면 실시간 경고와<br>선택한 음성으로 알려드립니다.</div>
-        <div class="hud-tags"><span>눈 감김 · YOLO26n</span><span>하품 · ResNet18</span><span>LOCAL OpenCV</span></div>
-      </div>
-      <div class="side-status"><span class="led"></span><b id="cockpit-state">SYSTEM READY</b><small id="cockpit-sub">차량 실내 AI 모니터 · 데모</small></div>
-      <div class="corner-tag">FOR DEMONSTRATION ONLY</div>
-    </div>""")
-    if missing:
-        st.error("모델 파일이 부족해. 설정에서 경로를 확인해줘.")
-        for f in missing:
-            st.code(f, language=None)
-    else:
-        try:
-            models = get_models(*(str(p) for p in paths))
-            if "aura_m" not in st.session_state:
-                st.session_state.aura_m = Monitor()
-            monitor = st.session_state.aura_m
-            if "aura_safety" not in st.session_state or not hasattr(st.session_state.aura_safety, "auto_demo"):
-                st.session_state.aura_safety = SafetySimulation()
-            safety = st.session_state.aura_safety
-            monitor.safety = safety
-            if "aura_engine" not in st.session_state or st.session_state.get("aura_paths") != tuple(map(str, paths)):
-                st.session_state.aura_engine = Engine(models, cfg)
-                st.session_state.aura_paths = tuple(map(str, paths))
-            engine = st.session_state.aura_engine
-            engine.cfg = cfg
-            if "aura_worker" not in st.session_state or st.session_state.get("aura_worker_engine") is not engine:
-                old_worker = st.session_state.get("aura_worker")
-                if old_worker is not None:
-                    old_worker.close()
-                st.session_state.aura_worker = LatestFrameWorker(engine, monitor, interval_ms=250, max_width=640)
-                st.session_state.aura_worker_engine = engine
-            background_worker = st.session_state.aura_worker
-            a, b = st.columns([1.55, 1], gap="medium")
-            with a:
-                st.html('<div class="monitor-head"><strong>◉ PC 로컬 웹캠</strong><small>LOCAL CAMERA · ORIGINAL</small></div>')
-                st.caption("이 PC에 연결된 카메라를 OpenCV로 직접 읽습니다. 원본 영상은 가공하지 않고 AI 분석만 백그라운드 처리합니다.")
-                cabin_frame_style()
-                camera_controls, camera_action = st.columns([1, 1.4], gap="small")
-                with camera_controls:
-                    camera_index = st.number_input("로컬 카메라 장치 번호", min_value=0, max_value=10,
-                                                   value=0, step=1, key="aura_camera_index")
-                with camera_action:
-                    st.caption("보통 기본 카메라는 0번입니다. USB 카메라는 1번 이상일 수 있습니다.")
-                    connect_col, stop_col = st.columns(2, gap="small")
-                    with connect_col:
-                        connect_camera = st.button("▶ 로컬 카메라 연결", type="primary", width="stretch",
-                                                    key="aura_local_camera_start")
-                    with stop_col:
-                        stop_camera = st.button("■ 연결 종료", width="stretch", key="aura_local_camera_stop")
-
-                if connect_camera:
-                    old_camera = st.session_state.get("aura_local_camera")
-                    if old_camera is not None:
-                        old_camera.stop()
-                    local_camera = LocalCameraStream(int(camera_index), background_worker)
-                    st.session_state.aura_local_camera = local_camera
-                    st.session_state.aura_camera_notice = None if local_camera.start() else local_camera.error
-                if stop_camera:
-                    local_camera = st.session_state.get("aura_local_camera")
-                    if local_camera is not None:
-                        local_camera.stop()
-                    st.session_state.aura_camera_notice = "로컬 카메라 연결을 종료했습니다."
-                notice = st.session_state.get("aura_camera_notice")
-                if notice:
-                    if "열지 못했습니다" in notice:
-                        st.error(notice)
-                    else:
-                        st.caption(notice)
-
-                with st.container(key="aura_camera_frame"):
-                    @st.fragment(run_every="200ms")
-                    def local_camera_preview():
-                        local_camera = st.session_state.get("aura_local_camera")
-                        if local_camera is None or not local_camera.running:
-                            st.image(str(ROOT / "aura_car_interior.jpg"), width="stretch")
-                            st.caption("시동 대기 · 로컬 카메라 연결 버튼을 눌러 시작하세요.")
-                            return
-                        frame, camera_fps, frame_age, camera_error = local_camera.snapshot()
-                        if frame is not None:
-                            st.image(frame, channels="BGR", width="stretch")
-                            st.caption(f"LOCAL CAMERA · {camera_fps:.1f} FPS · 최신 프레임 {frame_age * 1000:.0f} ms 전")
-                        elif camera_error:
-                            st.error(camera_error)
-                        else:
-                            st.info("카메라 프레임 연결 중...")
-
-                    local_camera_preview()
-            with b:
-                st.html('<div class="monitor-head"><strong>실시간 분석 패널</strong><small>LIVE INFERENCE</small></div>')
-                st.caption("로컬 카메라 연결 후 눈 / 입 분석 결과가 표시됩니다.")
-
-            @st.fragment(run_every="500ms")
-            def live_results():
-                data, events, audio = monitor.snapshot()
-                mode = data["mode"]
-                headline = "🚨 눈 감김 경고!" if mode == "eye" else "⚠️ 하품 감지!" if mode == "yawn" else "운전자 상태 모니터링" if mode == "ok" else "카메라 연결 대기"
-                desc = "눈을 오래 감고 있어요. 안전한 장소에서 쉬세요." if mode == "eye" else "하품이 감지됐어요. 피로 상태를 점검하세요." if mode == "yawn" else "AI가 눈과 입의 상태를 분석하고 있습니다."
-                st.html(f'<div class="alert {mode}"><div class="dot"></div><div><b>{headline}</b><br><span>{desc}</span></div></div>')
-                sound_events(audio)
-                values = [("눈 감김 점수", "판단 불가" if data["eye"] is None else f'{data["eye"]:.1%}', "YOLO26n · CLAHE" if cfg["eye_clahe"] else "YOLO26n · RGB"),
-                    ("하품 점수", "판단 불가" if data["yawn"] is None else f'{data["yawn"]:.1%}', "ResNet18 · " + cfg["yawn_color"]),
-                    ("연속 눈 감김", f'{data["duration"]:.1f}초', "경고 기준 시간"),
-                    ("카메라 FPS", f'{data["fps"]:.1f} FPS' if data["fps"] else "—", "AI 분석과 분리 · 카메라 수신 프레임")]
-                cards = "".join(f'<div class="card"><div class="label">{label}</div><div class="num">{value}</div><div class="foot">{note}</div></div>' for label, value, note in values)
-                st.html('<div class="metric-grid">' + cards + '</div>')
-                st.caption(f'모델 출력 점수 (보정된 확률 아님) · Closed ≥ {cfg["eye"]:.2f} / Yawn ≥ {cfg["yawn"]:.2f}')
-                st.html('<div class="roi-mini-title">◈ MEDIAPIPE · LANDMARK TRACKING <span>LIVE ROI</span></div>')
-                left_roi, right_roi = st.columns(2, gap="small")
-                with left_roi:
-                    if data.get("eye_points"):
-                        st.image(data["eye_points"], caption="👁 EYE · 눈꺼풀 랜드마크", width="stretch")
-                    else:
-                        st.caption("👁 EYE · 랜드마크 미검출")
-                with right_roi:
-                    if data.get("mouth_points"):
-                        st.image(data["mouth_points"], caption="◉ MOUTH · 입술 랜드마크", width="stretch")
-                    else:
-                        st.caption("◉ MOUTH · 랜드마크 미검출")
-                with st.expander("실제 모델 입력 이미지 보기", expanded=False):
-                    input_eye, input_mouth = st.columns(2, gap="small")
-                    with input_eye:
-                        if data.get("eye_roi"):
-                            st.image(data["eye_roi"], caption="YOLO 눈 입력 · 점 없음", width="stretch")
-                    with input_mouth:
-                        if data.get("mouth_roi"):
-                            st.image(data["mouth_roi"], caption="ResNet 입 입력 · 점 없음", width="stretch")
-                st.caption("원본 카메라 → MediaPipe 눈/입 추출 → 개별 전처리 → YOLO / ResNet → 지속시간 경고")
-                # Update HUD state with model outputs without rerunning WebRTC.
-                state_label = "EYES CLOSED" if mode == "eye" else "YAWN WARNING" if mode == "yawn" else "MONITORING" if mode == "ok" else "SYSTEM READY"
-                st.html('<script>(function(){const c=document.querySelector("#aura-cockpit");if(!c)return;c.classList.toggle("is-eye",' + json.dumps(mode == "eye") + ');c.classList.toggle("is-yawn",' + json.dumps(mode == "yawn") + ');let t=document.querySelector("#cockpit-state");if(t)t.textContent=' + json.dumps(state_label) + ';})();</script>', unsafe_allow_javascript=True)
-                st.html('<div class="section">감지 이벤트 기록</div>')
-                if events:
-                    st.dataframe(events, width="stretch", hide_index=True)
-                else:
-                    st.caption("아직 발생한 경고가 없어.")
-            with b:
-                live_results()
-
-            st.html("""<style>
-            .aura-safety{background:linear-gradient(125deg,#122a39,#0b1728);border:1px solid #355c70;
-              border-radius:18px;padding:17px 20px;margin:16px 0 8px}
-            .aura-safety .kicker{font-size:11px;letter-spacing:.17em;color:#7ad8c7;font-weight:800}
-            .aura-safety h3{font-size:20px;margin:6px 0;color:#e9f9f7}
-            .aura-safety p{color:#a9c4d0;font-size:13px;margin:5px 0}
-            </style>""")
-            st.html("""<div class="aura-safety"><div class="kicker">AURA RESPONSE · SIMULATION</div>
-               <h3>운전자 안전 대응 시뮬레이션</h3>
-               <p>실시간 경고와 분리된 가상 흐름 · 감속 → 정차·휴식 → 응답 대기 → 모의 SOS</p>
-               <p>실제 차량 제어·창문 작동·긴급 신고는 수행하지 않습니다. 시간은 시연용입니다.</p></div>""")
-
-            @st.fragment(run_every="1s")
-            def safety_panel():
-                safety.configure(st.session_state.get("aura_demo_fast_timing", True))
-                view = safety.tick()
-                names = {"monitor": ("정상 모니터링", "눈 감김 경고 2회/5분이면 가상 정차 시작"),
-                         "stopping": ("가상 감속 중", "안전 정차 시연 · 실제 속도 아님"),
-                         "rest": ("가상 정차 및 휴식", "창문 개방 연출 · 운전자 휴식 안내"),
-                         "ready": ("휴식/응답 확인", "차량은 가상 정지 상태 · 자동 재출발 없음"),
-                         "unresponsive": ("무반응 시나리오 진행", "의식 상태 측정 아님 · 버튼으로 상황을 취소 가능"),
-                         "sos": ("모의 긴급 구조 요청", "119 실제 통화·전송 없음")}
-                title, sub = names[view["mode"]]
-                left, right, third = st.columns([1.1, 1, 1], gap="small")
-                with left:
-                    st.metric("대응 상태", title)
-                    st.caption(sub)
-                with right:
-                    st.metric("가상 차량 속도", f'{view["speed"]:.0f} km/h')
-                    st.caption("실제 운행·제동과 연결되지 않음")
-                with third:
-                    st.metric("최근 5분 눈 감김 경고", f'{view["recent_eye_events"]}회')
-                    st.caption("2초 이상 눈 감김 경고 이벤트 기준")
-                if view.get("auto_demo", False):
-                    st.caption("자동 시연 진행 중 · 시작 시 입력된 눈 감김 경고는 모의 이벤트이며 실제 감지값이 아닙니다.")
-                if view["mode"] == "stopping":
-                    st.progress(max(0., min(1., 1. - view["speed"] / 80.)))
-                    st.warning("가상 감속 중 · 실제 차량에서는 검증된 안전 정지 시스템이 필요합니다.")
-                elif view["mode"] == "rest":
-                    st.success("가상 안전 정차 완료 · 창문 열림(연출) · 휴식 권고")
-                    st.progress(1. - view["rest_remaining"] / (15. if view["demo_fast"] else 300.))
-                    st.caption(f'가상 휴식 권고 남은 시간: {view["rest_remaining"]:.0f}초')
-                elif view["mode"] == "unresponsive":
-                    st.error("무반응 시나리오: 운전자 반응을 확인하세요. 실제 응급상황이면 지체 없이 구조를 요청해야 합니다.")
-                    st.caption(f'모의 SOS 화면 전환까지: {view["response_remaining"]:.0f}초')
-                    st.progress(1. - view["response_remaining"] / (30. if view["demo_fast"] else 600.))
-                elif view["mode"] == "sos":
-                    st.error("🚨 모의 119 구조 요청 화면 · 실제 신고는 하지 않았습니다.")
-                    st.info("실제 적용에는 검증된 차량 안전 시스템과 별도 긴급 신고 연동 및 법규 준수가 필요합니다.")
-                elif view["mode"] == "ready":
-                    st.info("휴식이 끝났거나 응답을 확인했어요. 자동 주행 재개는 지원하지 않습니다.")
-
-                st.caption("빠른 시연은 휴식 15초·무반응 30초로 압축합니다. 일반 시나리오는 5분·10분이며 안전·의료 기준이 아닙니다.")
-                st.checkbox("빠른 발표 시연 (시간 압축)", value=True, key="aura_demo_fast_timing")
-                b1,b2,b3 = st.columns(3, gap="small")
-                with b1:
-                    if st.button("▶ 자동 시연 시작", type="primary", width="stretch", key="safety_auto_demo"):
-                        safety.start_auto_demo(); st.rerun(scope="fragment")
-                with b2:
-                    if st.button("✅ 운전자 반응 확인", width="stretch", key="safety_ack"):
-                        safety.respond(); st.rerun(scope="fragment")
-                with b3:
-                    if st.button("↺ 시뮬레이션 초기화", width="stretch", key="safety_reset"):
-                        safety.reset(); st.rerun(scope="fragment")
-                with st.expander("안전 대응 이벤트 기록", expanded=False):
-                    st.dataframe(view["events"], hide_index=True, width="stretch")
-            safety_panel()
-        except Exception as exc:
-            st.error(f"실시간 모니터 초기화 실패: {type(exc).__name__}: {exc}")
-            st.code("python -m pip install --upgrade --force-reinstall 'mediapipe==0.10.21' 'protobuf>=4.25.3,<5'")
-
-elif page == "이미지 분석":
-    st.html('<div class="section">📸 IMAGE ANALYSIS</div><div class="dim">사진을 촬영하거나 업로드해서 눈·하품 모델을 테스트해.</div>')
-    shot = st.camera_input("카메라 촬영")
-    upl = st.file_uploader("또는 사진 업로드", type=["jpg", "jpeg", "png", "webp"])
-    photo = shot if shot is not None else upl
-    if missing:
-        st.error("모델 경로를 먼저 연결해야 해.")
-    elif photo:
-        try:
-            raw = photo.getvalue()
-            if len(raw) > 12 * 1024 * 1024:
-                st.error("12MB 이하 이미지를 사용해줘.")
-            else:
-                im = Image.open(io.BytesIO(raw)).convert("RGB")
-                if max(im.size) > 2000:
-                    im.thumbnail((2000, 2000))
-                st.image(im, width="stretch")
-                if st.button("AI 이미지 분석하기", type="primary"):
-                    m = get_models(*(str(p) for p in paths))
-                    eng = Engine(m, cfg, static=True)
-                    try:
-                        result = eng.predict(im)
-                    finally:
-                        eng.close()
-                    st.session_state.img_result = result
-                if "img_result" in st.session_state:
-                    r = st.session_state.img_result
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        kpi("눈 감김", "미검출" if r["eye"] is None else f'{r["eye"]:.1%}', "YOLO26n · CLAHE" if cfg["eye_clahe"] else "YOLO26n · RGB")
-                    with c2:
-                        kpi("하품", "미검출" if r["yawn"] is None else f'{r["yawn"]:.1%}', "ResNet18 · " + cfg["yawn_color"])
-                    if r["mouth"] is not None:
-                        st.image(r["mouth"], caption="하품 모델 입력 · 입 ROI", width=224)
-                    if r["eyes"]:
-                        st.image(r["eye_processed"], caption="눈 모델 실제 입력 · 전처리 적용 ROI", width=224)
-        except Exception as exc:
-            st.error(f"이미지 분석 오류: {type(exc).__name__}: {exc}")
-else:
-    st.html('<div class="section">⚙️ CONFIGURATION</div>')
-    st.text_input("YOLO26n 눈 모델 경로", value=str(ROOT / "runs/eyes_yolo26n-cls/weights/best.pt"), key="eyes_path")
-    st.text_input("팀원 프로젝트 폴더", value=str(TEAM), key="team_path")
-    for name, p in [("눈 가중치", paths[0]), ("팀원 모듈", paths[1] / "03_yawn_common.py"), ("하품 가중치", paths[2]), ("눈 감김 MP3", ROOT / "눈감김.mp3"), ("하품 MP3", ROOT / "하품.mp3"), ("차량 장식 배경(선택)", ROOT / "aura_car_interior.jpg")]:
-        st.write(("✅" if p.is_file() else "❌") + " " + name + " — " + str(p))
-    c1, c2 = st.columns(2)
+if page=='실시간 모니터':
+    hero()
+    st.html('<div class="aura-start-banner"><span><strong>LOCAL CAMERA</strong> · 웹캠 원본 + 독립 AI 추론</span><span>눈 5초  /  하품 3초  /  소리 충돌 방지</span></div>')
+    top1,top2,top3,top4=st.columns([1,1,1.6,1.4],gap='small')
+    with top1:
+        st.number_input('카메라 장치 번호',min_value=0,max_value=9,step=1,key='camera_index')
+    with top2:
+        st.selectbox('카메라 화질',['640×480 (권장)','1280×720 (고화질)'],key='camera_resolution')
+    active=bool((cam:=get_running_camera()) and cam.running)
+    with top3:
+        st.caption('시작 · 정상 종료 후에도 기존 모델 가중치는 유지됩니다.')
+        if st.button('▶  로컬 웹캠 시작',type='primary',width='stretch',disabled=active,key='camera_start'):
+            st.session_state.camera_notice=launch_camera()
+            st.rerun()
+    with top4:
+        st.caption('장치 점유 해제 · 다른 앱에서 사용 가능')
+        if st.button('■  웹캠 종료',width='stretch',disabled=not active,key='camera_stop'):
+            shutdown_camera();st.session_state.camera_notice='카메라 연결을 종료했어.';st.rerun()
+    if st.session_state.camera_notice:
+        if '실패' in st.session_state.camera_notice or '없어' in st.session_state.camera_notice or 'Error' in st.session_state.camera_notice:
+            st.error(st.session_state.camera_notice)
+        else:st.info(st.session_state.camera_notice)
+    if any(not p.exists() for p in (EYE_FILE,YAWN_FILE)):
+        st.warning('가중치가 아직 없다면 runs/eyes_yolo26n-cls/weights/best.pt 및 runs/yawn_yolo26s-cls/weights/best.pt 위치를 확인해줘.')
+    st.markdown('#### 음성 경고 · 눈 5초 / 하품 3초')
+    cam=get_running_camera()
+    render_audio_panel(ROOT,cam.events_url if cam and cam.running else None)
+    c1,c2=st.columns([2,1])
     with c1:
-        st.checkbox("눈 ROI CLAHE 활성화 (개선 후보)", key="eye_clahe")
-        st.slider("눈 감김 판정 임계값", .05, .95, step=.05, key="eye_t")
-        st.slider("눈 감김 경고 지속시간(초)", .5, 5., step=.5, key="eye_s")
+        st.caption('경고음은 사용자가 켠 뒤에만 재생됩니다. 눈 경고 우선, 동시 재생 없음, 연속 판정당 1회.')
     with c2:
-        st.selectbox("하품 입 ROI 전처리", ["RGB (기본)", "Grayscale (실험)"], key="yawn_color")
-        st.slider("하품 판정 임계값", .05, .95, step=.05, key="yawn_t")
-        st.slider("하품 지속시간(초)", .5, 5., step=.5, key="yawn_s")
-    st.slider("추론 간격(프레임)", 1, 6, key="stride")
-    st.checkbox("빠른 시연 모드 (5분 휴식→15초 / 10분 무반응→30초)", key="aura_demo_fast")
-    st.caption("기본 시연 규칙: 눈 감김 경고 5분 내 2회 → 가상 감속/정차 → 휴식 권고. 무반응은 실제 측정값이 아니라 버튼으로 시작하는 별도 시나리오입니다.")
-    st.caption("🚘 차량 실내 사진은 라이브 카메라 바깥 프레임의 배경으로만 사용돼. 웹캠 원본은 변경하지 않아. 설정 변경은 카메라 재시작 후 적용하는 게 안전해.")
-    st.info("눈: CLAHE + 0.25, 하품: RGB + 0.15는 외부 개발셋 기반 후보 설정입니다. 하품 0.10 및 0.50과 실시간 비교 후 최종 확정하세요.")
+        if st.button('↺ 시뮬레이션 초기화',width='stretch',key='reset_safety'):
+            st.session_state.safety.reset()
+            st.rerun()
+    live_col,stats_col=st.columns([1.6,1],gap='medium')
+    with live_col:
+        st.html('<div class="aura-stage-title"><b>◉ 원본 카메라 화면</b><small>LOCAL / MJPEG STREAM</small></div>')
+        camera=get_running_camera()
+        if camera is not None and camera.running:
+            # The browser downloads MJPEG directly from a localhost server, NOT via Streamlit rerun.
+            st.html(f'<div class="aura-frame"><img src="{camera.url}" alt="원본 로컬 웹캠 스트림"></div>')
+        else:
+            st.html('<div class="aura-frame"><div class="aura-idle"><div><strong>LOCAL CAMERA READY</strong><br><span>웹캠 시작 버튼으로 연결하세요.<br>클라우드 전송 없이 이 PC에서 작동합니다.</span></div></div></div>')
+        st.caption('원본 영상은 얼굴을 합성하거나 잘라 표시하지 않아. AI 분석 입력만 별도로 ROI 처리해.')
+    with stats_col:
+        st.html('<div class="aura-stage-title"><b>AI 상태 분석</b><small>LIVE · EYE / YAWN</small></div>')
+        probs_panel()
+    with st.expander('실시간 경고 설정 · 필요할 때만 열기'):
+        a,b,c=st.columns(3)
+        with a:st.slider('눈 판정 임계값',0.05,0.95,step=.05,key='eye_threshold')
+        with b:st.slider('하품 판정 임계값',0.05,0.95,step=.05,key='yawn_threshold')
+        with c:st.slider('AI 프레임 분석 간격 (ms)',200,800,step=50,key='infer_interval')
+        a,b=st.columns(2)
+        with a:st.slider('눈 감김 경고 시간 (초)',5.,10.,step=.5,key='eye_seconds')
+        with b:st.slider('하품 경고 시간 (초)',3.,8.,step=.5,key='yawn_seconds')
+        st.radio('하품 웹캠 입력 방식',
+            ['full','face_focus'],
+            format_func=lambda v: '원본 전체 RGB (외부 평가와 동일)' if v=='full' else '얼굴 중심 ROI (웹캠 실험용 · 정확도 미검증)',
+            key='yawn_view',horizontal=True)
+        st.caption('웹캠에서 얼굴이 작게 나올 때만 얼굴 중심 모드를 비교해봐. 기존 31번 정확도는 원본 전체 입력 기준이야.')
+        if st.button('현재 설정 적용',type='primary'):
+            engine=st.session_state.get('local_engine')
+            if engine:engine.cfg=params()
+            worker=st.session_state.get('local_worker')
+            if worker:worker.interval=st.session_state.infer_interval/1000
+            st.success('새 기준을 적용했어. 기존 가중치는 그대로야.')
+    with st.expander('안전 대응 시뮬레이션 바로가기'):
+        safety_panel()
 
-st.caption("AURA DRIVE v9 · 감속·창문·119는 모두 가상 시뮬레이션 · 실제 운전 안전장치로 사용하지 마세요.")
+elif page=='사진 분석':
+    st.markdown('## 이미지 1장 분석')
+    st.caption('실제 모델에 입력되는 전처리를 확인하는 페이지 · 스트림링 캠과 독립')
+    upload=st.file_uploader('얼굴이 나온 이미지 업로드 (JPG / PNG / WebP)',type=['jpg','jpeg','png','webp'])
+    if upload:
+        content=upload.getvalue()
+        if len(content)>12*1024*1024:st.error('이미지는 12 MB 이하로 선택해줘.')
+        else:
+            im=ImageOps.exif_transpose(Image.open(io.BytesIO(content))).convert('RGB')
+            if max(im.size)>1600:im.thumbnail((1600,1600))
+            a,b=st.columns([1.25,1])
+            with a:st.image(im,caption='원본 이미지',width='stretch')
+            with b:
+                if st.button('AI 분류 실행',type='primary',width='stretch'):
+                    try:
+                        model=models_cached(str(EYE_FILE.resolve()),str(YAWN_FILE.resolve()))
+                        engine=FaceEngine(model,params(),static=True)
+                        try:result=engine.predict(im)
+                        finally:engine.close()
+                        st.session_state.photo_result=result
+                    except Exception as e:st.error(f'{type(e).__name__}: {e}')
+                result=st.session_state.get('photo_result')
+                if result:
+                    st.metric('눈 감김 점수',f"{result['eye']:.1%}" if result['eye'] is not None else 'ROI 실패')
+                    st.metric('하품 점수',f"{result['yawn']:.1%}" if result['yawn'] is not None else '얼굴 미검출')
+                    if result['eye_processed']:st.image(result['eye_processed'],caption='눈 ROI + CLAHE',width=200)
+                    st.caption('하품 입력은 선택한 RGB 모드에 따라 원본 전체 또는 얼굴 중심 crop을 224px 정사각 패딩')
+
+elif page=='안전 대응 시뮬레이션':
+    hero()
+    st.toggle('빠른 발표 시연 (15초/30초)',key='fast_demo')
+    safety_panel()
+
+elif page=='설정':
+    st.markdown('## 실행 환경 및 최종 모델')
+    st.caption('실시간 추론은 CPU에서 처리. 원본 영상은 localhost에 직접 연결되며 서버 공개 배포를 전제로 하지 않습니다.')
+    for label,p in [('눈 YOLO26n',EYE_FILE),('하품 YOLO26s',YAWN_FILE),('차량 히어로 이미지',CAR_FILE),('기존 비교 코드',ROOT/'31_yawn_external_compare.py')]:
+        st.write(('✅' if p.exists() else '❌')+f' {label}: `{p}`')
+    st.checkbox('눈 ROI CLAHE 사용',key='eye_clahe')
+    st.slider('AI 분석 간격 (ms)',200,800,step=50,key='infer_interval')
+    st.slider('눈 감김 판정 임계값',.05,.95,step=.05,key='eye_threshold')
+    st.slider('하품 판정 임계값',.05,.95,step=.05,key='yawn_threshold')
+    st.radio('하품 입력 방식', ['full','face_focus'],
+             format_func=lambda v: '원본 전체 RGB (검증된 기준)' if v=='full' else '얼굴 중심 ROI (웹캠 실험)',
+             key='yawn_view', horizontal=True)
+    st.caption('선정 근거: 눈 CEW 개발용 평가 YOLO26n+CLAHE+0.25 (88.36%), 하품 외부 Roboflow YOLO26s full RGB+0.50 (78.37%). 실제 영상에 대한 최종 독립 정확도는 아직 측정하지 않음.')
+    if st.button('현재 설정 적용',type='primary'):
+        e=st.session_state.get('local_engine')
+        if e:e.cfg=params()
+        w=st.session_state.get('local_worker')
+        if w:w.interval=st.session_state.infer_interval/1000
+        st.success('저장됨. 모델 가중치는 변경하지 않았어.')
+    if st.button('모니터링 종료 및 처음 화면으로',width='stretch'):
+        shutdown_camera();st.session_state.started=False;st.rerun()
+
+st.html('<div class="aura-footer">AURA DRIVE / LOCAL DEMO · THE CAMERA RUNS ONLY ON THIS PC · SIMULATED SAFETY RESPONSE · NOT FOR REAL VEHICLE CONTROL</div>')

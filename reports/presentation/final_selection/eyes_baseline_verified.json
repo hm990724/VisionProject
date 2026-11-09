@@ -1,0 +1,47 @@
+[
+  {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "tp": 102,
+    "fp": 0,
+    "fn": 0,
+    "task": "eyes",
+    "model": "yolo26n",
+    "test_count": 217,
+    "model_mb": 3.038515090942383,
+    "latency_ms_median": 10.098049991938751,
+    "latency_ms_test_mean": 11.203066820012134
+  },
+  {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "tp": 102,
+    "fp": 0,
+    "fn": 0,
+    "task": "eyes",
+    "model": "resnet18",
+    "test_count": 217,
+    "model_mb": 42.70649242401123,
+    "latency_ms_median": 23.34280000650324,
+    "latency_ms_test_mean": 23.394251152219073
+  },
+  {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "tp": 102,
+    "fp": 0,
+    "fn": 0,
+    "task": "eyes",
+    "model": "mobilenet_v3_small",
+    "test_count": 217,
+    "model_mb": 5.912270545959473,
+    "latency_ms_median": 11.632849993475247,
+    "latency_ms_test_mean": 12.042527189633857
+  }
+]

@@ -1,0 +1,16 @@
+2026-11-08 22:36:27.107 Uvicorn server started on 127.0.0.1:62778
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:62778
+
+
+DevTools listening on ws://127.0.0.1:62779/devtools/browser/0d355c80-5bf9-4f53-b4fc-0711d9fba072
+[5908:17260:1108/223629.561:ERROR:chrome\browser\task_manager\providers\fallback_task_provider.cc:126] Every renderer should have at least one task provided by a primary task provider. If a "Renderer" fallback task is shown, it is a bug. If you have repro steps, please file a new bug and tag it as a dependency of crbug.com/40528867.
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+W0000 00:00:1794144996.249382   28664 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1794144996.263067   28424 face_landmarker_graph.cc:174] Sets FaceBlendshapesGraph acceleration to xnnpack by default.
+W0000 00:00:1794144996.271158   27000 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1794144996.277544   18932 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1794144996.294914   18932 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.

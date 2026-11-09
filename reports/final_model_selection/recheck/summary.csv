@@ -1,0 +1,4 @@
+﻿model,input,threshold,total,positive_count,negative_count,valid,roi_fail,errors,tp,tn,fp,fn,accuracy,valid_accuracy,recall,precision,f1,fpr,latency_ms_median
+mobilenet_v3_small,face,0.5,393,171,222,393,0,0,51,194,28,120,0.62341,0.62341,0.298246,0.64557,0.408,0.126126,16.2189
+yolo26n,face,0.5,393,171,222,393,0,0,96,204,18,75,0.763359,0.763359,0.561404,0.842105,0.673684,0.081081,14.3314
+yolo26s,face,0.5,393,171,222,393,0,0,129,179,43,42,0.783715,0.783715,0.754386,0.75,0.752187,0.193694,20.7293

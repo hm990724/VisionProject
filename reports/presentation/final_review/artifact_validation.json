@@ -1,0 +1,19 @@
+{
+  "slides": 33,
+  "speaker_notes": 33,
+  "pdf_pages": {
+    "AURA_DRIVE_발표대본.pdf": 33,
+    "AURA_DRIVE_최종발표_33장.pdf": 33
+  },
+  "out_of_bounds_shapes": [],
+  "embedded_video": false,
+  "native_powerpoint_render_verified": false,
+  "pil_previews_visually_checked": true,
+  "source_sha256": {
+    "reports/cew/threshold_analysis/threshold_sweep.csv": "89e9f13eb0097827d71e847606586f7a3a9d79790a302519e5aba992f21b2f4f",
+    "reports/yawn_roboflow/threshold_analysis/yawn_threshold_sweep.csv": "b430a0461fc1cae94c6c3f3e8ebd51018ac7a7492b52120ac82eeebdf0937e44",
+    "reports/yawn_external_model_compare/summary.csv": "ea5bd1e41efea1a7e494c98be7ed93d2c7b618c1d0e8c511624e841160e17668",
+    "reports/hardcase_finetune/eyes_summary.csv": "4c07e61eb91e21194fd3f9574f8d8fe669f472967de6aef8407470b13e35202f"
+  },
+  "editable_text_shapes": 630
+}

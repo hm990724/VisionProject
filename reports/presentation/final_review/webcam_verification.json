@@ -1,0 +1,147 @@
+{
+  "startup": "pass",
+  "monitor_initialization": "pass",
+  "camera_requested": true,
+  "camera_samples": [
+    {
+      "frame_available": false,
+      "capture_fps": 0.0,
+      "age_ms": null,
+      "error": null,
+      "inference_count": 0,
+      "inference_ms": 0.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": false,
+      "capture_fps": 0.0,
+      "age_ms": null,
+      "error": null,
+      "inference_count": 0,
+      "inference_ms": 0.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 10.18,
+      "age_ms": 0.0,
+      "error": null,
+      "inference_count": 3,
+      "inference_ms": 31.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 10.22,
+      "age_ms": 109.0,
+      "error": null,
+      "inference_count": 7,
+      "inference_ms": 16.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 9.83,
+      "age_ms": 78.0,
+      "error": null,
+      "inference_count": 11,
+      "inference_ms": 31.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 9.94,
+      "age_ms": 78.0,
+      "error": null,
+      "inference_count": 15,
+      "inference_ms": 16.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 9.86,
+      "age_ms": 63.0,
+      "error": null,
+      "inference_count": 19,
+      "inference_ms": 31.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 10.0,
+      "age_ms": 63.0,
+      "error": null,
+      "inference_count": 23,
+      "inference_ms": 16.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 9.86,
+      "age_ms": 47.0,
+      "error": null,
+      "inference_count": 27,
+      "inference_ms": 16.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 10.02,
+      "age_ms": 47.0,
+      "error": null,
+      "inference_count": 31,
+      "inference_ms": 15.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 9.85,
+      "age_ms": 31.0,
+      "error": null,
+      "inference_count": 35,
+      "inference_ms": 32.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 10.03,
+      "age_ms": 47.0,
+      "error": null,
+      "inference_count": 39,
+      "inference_ms": 16.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 9.91,
+      "age_ms": 32.0,
+      "error": null,
+      "inference_count": 43,
+      "inference_ms": 16.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 10.05,
+      "age_ms": 32.0,
+      "error": null,
+      "inference_count": 47,
+      "inference_ms": 16.0,
+      "inference_error": null
+    },
+    {
+      "frame_available": true,
+      "capture_fps": 9.97,
+      "age_ms": 16.0,
+      "error": null,
+      "inference_count": 51,
+      "inference_ms": 16.0,
+      "inference_error": null
+    }
+  ],
+  "camera_frames_received": true,
+  "inference_count": 51,
+  "camera_stopped": true,
+  "navigation": "pass",
+  "simulation_button": "pass"
+}

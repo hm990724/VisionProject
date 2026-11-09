@@ -1,0 +1,3 @@
+﻿입력 부위,클래스,양성 기준,활용
+눈,Open / Closed,Closed,지속적인 눈 감김 경고
+입,no_yawn / yawn,yawn,하품 행동 알림
